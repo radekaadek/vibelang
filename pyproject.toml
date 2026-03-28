@@ -1,0 +1,161 @@
+# https://docs.basedpyright.com/latest/configuration/config-files/#diagnostic-settings-defaults
+# rule help:
+# https://docs.basedpyright.com/latest/benefits-over-pyright/new-diagnostic-rules/
+# https://microsoft.github.io/pyright/#/configuration?id=type-check-diagnostics-settings
+[tool.basedpyright]
+pythonVersion = "3.13"
+typeCheckingMode = "all"
+allowedUntypedLibraries = ["llvmlite"]
+
+reportIncompatibleMethodOverride = "none"
+reportUnknownArgumentType = "none"
+reportAttributeAccessIssue = "none"
+reportUnknownVariableType = "none"
+
+# Too noisy with pandas/numpy — many operations return Any-typed values at the boundary
+reportAny = "none"
+# Codebase intentionally uses Any in some annotations for numpy/pandas interop
+reportExplicitAny = "none"
+# Pandas and Numpy stubs return partially unknown types — false positives on member access
+reportUnknownMemberType = "none"
+# Multi-line string literals are used throughout (E501 line length is not enforced)
+reportImplicitStringConcatenation = "none"
+# Many pandas DataFrame subclasses and dynamic attributes cannot be statically annotated
+reportUnannotatedClassAttribute = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["."]
+# Mock attribute access (e.g. mock.method.return_value = ...) is not statically typed
+reportAttributeAccessIssue = "none"
+# Test classes often initialize instance variables outside __init__ via setUp()
+reportUninitializedInstanceVariable = "none"
+# Mock constructors and test fixtures intentionally accept values of mismatched types
+reportArgumentType = "none"
+# Third-party test utilities and mock return values often lack type annotations
+reportUnknownVariableType = "none"
+# isinstance() checks on Mock objects may be flagged as always True/False
+reportUnnecessaryIsInstance = "none"
+# Mock objects passed as arguments have unknown types at the call site
+reportUnknownArgumentType = "none"
+# Too noisy — many idiomatic calls deliberately discard non-None return values
+reportUnusedCallResult = "none"
+
+[[tool.basedpyright.executionEnvironments]]
+root = "scripts"
+extraPaths = ["."]
+# Scripts frequently call functions for side effects and discard return values
+reportUnusedCallResult = "none"
+
+[tool.sqlfluff.core]
+dialect = "postgres"
+templater = "placeholder"
+
+[tool.sqlfluff.templater.placeholder]
+param_style = "colon"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88  # Same as Black
+indent-width = 4
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
+[tool.ruff.format]
+docstring-code-format = true
+line-ending = "lf"  # Enforce Unix line endings regardless of developer OS
+
+[tool.ruff.lint]
+select = ["ALL"]
+fixable = ["ALL"]
+extend-select = ["D401"]
+
+ignore = [
+  # --- Google docstring convention (enforced via pydocstyle.convention = "google")
+  "D100",  # missing docstring in public module
+  "D101",  # missing docstring in public class — __init__ docstring covers it
+  "D104",  # missing docstring in public package
+  "D105",  # missing docstring in magic method
+  "D106",  # missing docstring in public nested class
+
+  # --- Formatter conflicts (Black / ruff format) ---
+  "COM812",  # missing trailing comma — Black handles trailing commas
+  "COM819",  # prohibited trailing comma — Black handles trailing commas
+  "ISC001",  # implicit string concat on one line — conflicts with Black formatting
+  "W191",    # indentation contains tabs — formatter enforces spaces
+  "E501",    # line too long — long imports and descriptive test names are intentional
+
+  # --- Type annotations ---
+  "ANN401",  # use of Any — needed for pandas/numpy boundary types
+
+  # --- Security: acceptable patterns in this codebase ---
+  "BLE001",  # blind exception catch — used in specific top-level error handling
+
+  # --- Complexity: too strict for data-processing and policy code ---
+  "C901",    # complex structure — some processing functions are inherently complex
+
+  # --- Pylint: too strict for service/framework code ---
+  "PLR0913",  # too many arguments — service/handler patterns require many parameters
+
+  # --- Minor style preferences ---
+  "RUF010",  # use explicit conversion flag (__str__, __repr__) — readability preference
+
+  # --- Logging ---
+  "LOG015",  # root logger used — acceptable for now
+
+  # --- Exception handling ---
+  "TRY003",  # long exception message outside exception class — not enforced here
+  "TRY300",  # return in try body — moving to else branch adds no clarity
+
+  # --- Hashing ---
+  "PLW1641",  # __eq__ without __hash__ — dataclasses intentionally omit __hash__
+
+  # --- Type unions ---
+  "PYI041",  # redundant numeric union (int | float) — serialization/deserialization
+             # classes intentionally distinguish int from float
+
+  # --- Python compatibility ---
+  "UP015",  # unnecessary open mode parameter "r" — kept for explicit readability
+  "UP040",  # PEP 695 type alias syntax (`type` keyword) — limited IDE support
+  "UP047",  # PEP 695 generic function syntax — limited IDE support for new syntax
+
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.pycodestyle]
+max-doc-length = 88
+
+[tool.ruff.lint.flake8-unused-arguments]
+ignore-variadic-names = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  "D",       # docstrings not required in tests — test names are self-documenting
+  "N802",    # function name not lowercase — TestCase uses setUp/tearDown conventions
+  "S101",    # assert — standard pytest pattern in tests
+  "S105",    # hardcoded password string — acceptable in test fixtures
+  "S106",    # hardcoded password in function argument — acceptable in test fixtures
+  "SLF001",  # private member accessed — needed to test internal behaviour
+  "TRY002",  # raise Exception — acceptable in test helpers and fixtures
+  "S110",    # try-except-pass — used in try/except/else expect-exception assertions
+  "PT009",   # assertRaises usage — TestCase style, not pytest.raises
+  "PT027",   # assertRaisesRegex usage — TestCase style, not pytest.raises
+  "PGH003",  # type: ignore without specific code — tests intentionally pass wrong types
+  "DTZ001",  # datetime() without tzinfo — test fixtures use naive datetimes
+  "PLR2004",  # magic value in comparison — common in test assertions
+  "RUF012",  # mutable class variable without ClassVar — mutable defaults in fixtures
+  "S608",    # possible SQL injection — false positive: sql.SQL() is psycopg2's safe API
+  "N801",    # class name not CapWords — throwaway and underscore classes in tests
+  "S314",    # xml.etree.ElementTree — not a security concern in tests
+]
+"scripts/**/*.py" = [
+  "INP001",  # not an importable package — scripts don't require __init__.py
+  "EXE002",  # missing executable bit — managed outside version control
+  "T201",    # print() allowed in scripts — standard CLI output mechanism
+]
+"**/*.ipynb" = [
+  "T201",  # print() allowed in notebooks — standard interactive output mechanism
+]

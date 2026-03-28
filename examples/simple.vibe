@@ -1,0 +1,10 @@
+int initialValue = 50;
+int offset = 15;
+
+int result = initialValue + offset;
+
+print(result);
+
+result = result - 20;
+
+print(result);
