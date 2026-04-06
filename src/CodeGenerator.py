@@ -59,34 +59,33 @@ class CodeGenerator(vibelangVisitor):
         """Return the current symbol table."""
         return self.symbol_table[-1]
 
-    def allocate_variable(self, name: str, var_type: str) -> ir.AllocaInstr:
+    def allocate_variable(self, name: str, var_type: str, line: int) -> ir.AllocaInstr:
         """Allocate memory for a variable."""
         if name in self.current_scope():
             msg = f"Semantic error: Variable '{name}' already exists in this scope."
-            raise SemanticError(msg)
+            raise SemanticError(msg, line)
 
-        # When you add 'real' to the grammar, you just add an `elif` here.
         if var_type != "int":
             msg = f"Semantic error: Unsupported type '{var_type}'. Only 'int' is currently supported."
-            raise SemanticError(msg)
+            raise SemanticError(msg, line)
 
         llvm_type = self.i32
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg)
+            raise SemanticError(msg, line)
 
         ptr = self.builder.alloca(llvm_type, name=name)
         self.current_scope()[name] = {"ptr": ptr, "type": var_type}
         return ptr
 
-    def lookup_variable(self, name: str) -> dict[str, object]:
+    def lookup_variable(self, name: str, line: int) -> dict[str, object]:
         """Lookup a variable in the current scope."""
         for scope in reversed(self.symbol_table):
             if name in scope:
                 return scope[name]
         msg = f"Semantic error: Undeclared variable '{name}'."
-        raise SemanticError(msg)
+        raise SemanticError(msg, line)
 
     # --- AST NODE VISITING ---
 
@@ -110,65 +109,74 @@ class CodeGenerator(vibelangVisitor):
     @override
     def visitVarDeclAssign(self, ctx: vibelangParser.VarDeclAssignContext) -> object:
         type_ctx = ctx.type_()
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
         if type_ctx is None:
             msg = "Semantic error: Cannot recognize variable type."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         var_type = type_ctx.getText()
 
         id_node = ctx.ID()
         if id_node is None:
             msg = "Semantic error: Cannot recognize variable name."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         var_name = id_node.getText()
 
-        ptr = self.allocate_variable(var_name, var_type)
+        ptr = self.allocate_variable(var_name, var_type, ctx.start.line)
 
         expr_ctx = ctx.expr()
         if expr_ctx is None:
             msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         val = self.visit(expr_ctx)
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         _ = self.builder.store(val, ptr)
         return None
 
     @override
     def visitVarAssign(self, ctx: vibelangParser.VarAssignContext) -> object:
         id_node = ctx.ID()
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
         if id_node is None:
             msg = "Semantic error: Cannot recognize variable name."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         var_name = id_node.getText()
 
-        var_info = self.lookup_variable(var_name)
+        var_info = self.lookup_variable(var_name, ctx.start.line)
         ptr = cast("ir.Value", var_info["ptr"])
 
         expr_ctx = ctx.expr()
         if expr_ctx is None:
             msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         val = self.visit(expr_ctx)
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         _ = self.builder.store(val, ptr)
         return None
 
     @override
     def visitPrintStmt(self, ctx: vibelangParser.PrintStmtContext) -> object:
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
         expr_ctx = ctx.expr()
         if expr_ctx is None:
             msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         val = self.visit(expr_ctx)
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
 
         fmt_ptr = self.builder.bitcast(self.global_fmt_int, ir.IntType(8).as_pointer())
         _ = self.builder.call(self.printf, [fmt_ptr, val])
@@ -176,52 +184,61 @@ class CodeGenerator(vibelangVisitor):
 
     @override
     def visitIdExpr(self, ctx: vibelangParser.IdExprContext) -> object:
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
         id_node = ctx.ID()
         if id_node is None:
             msg = "Semantic error: Cannot recognize variable name."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         var_name = id_node.getText()
 
-        var_info = self.lookup_variable(var_name)
+        var_info = self.lookup_variable(var_name, ctx.start.line)
         ptr = cast("ir.Value", var_info["ptr"])
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         return self.builder.load(ptr, name=f"{var_name}_val")
 
     @override
     def visitIntExpr(self, ctx: vibelangParser.IntExprContext) -> object:
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
         int_node = ctx.INT()
         if int_node is None:
             msg = "Semantic error: Cannot recognize integer."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         val = int(int_node.getText())
         return ir.Constant(self.i32, val)
 
     @override
     def visitAddSubExpr(self, ctx: vibelangParser.AddSubExprContext) -> object:
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
         expr_left = ctx.expr(0)
         if expr_left is None:
             msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         left = self.visit(expr_left)
 
         expr_right = ctx.expr(1)
         if expr_right is None:
             msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         right = self.visit(expr_right)
 
         op_node = ctx.getChild(1)
         if op_node is None:
             msg = "Semantic error: Cannot recognize operator."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
         op = op_node.getText()
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg)
+            raise SemanticError(msg, ctx.start.line)
 
         if op == "+":
             return self.builder.add(left, right, name="addtmp")
