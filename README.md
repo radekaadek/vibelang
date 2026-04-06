@@ -7,7 +7,7 @@ The compiler requires the user to have Python 3.14+, LLVM 22+ and Java 17+ insta
 ```bash
 # Install ANTLR
 curl -O https://www.antlr.org/download/antlr-4.13.1-complete.jar
-alias antlr4='java -jar antlr-4.13.2-complete.jar'
+alias 'antlr4=java -jar antlr-4.13.1-complete.jar'
 
 # Generate Python parser code using the Visitor pattern
 antlr4 -Dlanguage=Python3 -visitor -no-listener vibelang.g4
