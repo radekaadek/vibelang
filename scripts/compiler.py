@@ -13,33 +13,9 @@ binding.initialize_native_target()
 binding.initialize_native_asmprinter()
 
 
-@click.command()
-@click.argument(
-    "input_file", type=click.Path(exists=True, dir_okay=False, path_type=Path)
-)
-@click.option(
-    "-o",
-    "--output",
-    type=click.Path(path_type=Path),
-    default=Path("output.ll"),
-    show_default=True,
-    help="Path where the compiled LLVM IR will be saved.",
-)
-@click.option(
-    "-O",
-    "--opt-level",
-    type=click.IntRange(0, 3),
-    default=3,
-    show_default=True,
-    help="Optimization level (0 = none, 3 = max).",
-)
-@click.option(
-    "-v",
-    "--verbose",
-    is_flag=True,
-    help="Print the generated LLVM IR (both unoptimized and optimized) to the console.",
-)
-def compile_vibe(input_file: Path, output: Path, opt_level: int, *, verbose: bool) -> None:
+def compile_vibe(
+    input_file: Path, output: Path, opt_level: int, *, verbose: bool
+) -> None:
     """Vibelang Compiler 🚀
 
     Compiles an INPUT_FILE written in Vibelang into optimized LLVM IR.
@@ -103,5 +79,37 @@ def compile_vibe(input_file: Path, output: Path, opt_level: int, *, verbose: boo
         raise click.Abort from e
 
 
+@click.command()
+@click.argument(
+    "input_file", type=click.Path(exists=True, dir_okay=False, path_type=Path)
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=Path("output.ll"),
+    show_default=True,
+    help="Path where the compiled LLVM IR will be saved.",
+)
+@click.option(
+    "-O",
+    "--opt-level",
+    type=click.IntRange(0, 3),
+    default=3,
+    show_default=True,
+    help="Optimization level (0 = none, 3 = max).",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Print the generated LLVM IR (both unoptimized and optimized) to the console.",
+)
+def compile_vibe_app(
+    input_file: Path, output: Path, opt_level: int, *, verbose: bool
+) -> None:
+    compile_vibe(input_file, output, opt_level, verbose=verbose)
+
+
 if __name__ == "__main__":
-    compile_vibe()
+   compile_vibe_app()

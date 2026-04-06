@@ -1,6 +1,18 @@
-int a = 3.99;
+int32 a = 3.99;
 print(a);
-float b = 42;
+float64 b = 42;
 print(b);
-float c = a + b;
+float64 c = a + b;
 print(c);
+
+float64 pi = 3.14159;
+
+int32 calkowita = pi;
+print(calkowita);
+
+float64 z_calkowitej = calkowita;
+print(z_calkowitej);
+
+int64 duzy_obrot = 500;
+int32 maly_obrot = duzy_obrot;
+print(maly_obrot);

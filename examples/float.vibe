@@ -1,4 +1,4 @@
-float pi = 3.1415;
-int promien = 5;
-float pole = pi * (promien * promien);
+float64 pi = 3.1415;
+int64 promien = 5;
+float64 pole = pi * (promien * promien);
 print(pole);

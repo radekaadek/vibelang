@@ -1,6 +1,6 @@
-float pi = 3.1415;
-int r = 10;
-float pole = pi * (r * r);
+float64 pi = 3.1415;
+int64 r = 10;
+float64 pole = pi * (r * r);
 print(pole);
 r = 5;
 pole = pi * (r * r);

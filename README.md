@@ -35,3 +35,9 @@ clang output.ll -o vibe_program
 chmod +x vibe_program
 ./vibe_program
 ```
+
+## Testing
+
+```bash
+python3 -m pytest
+```

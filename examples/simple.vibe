@@ -1,7 +1,7 @@
-int initialValue = 50;
-int offset = 15;
+int64 initialValue = 50;
+int64 offset = 15;
 
-int result = initialValue + offset;
+int64 result = initialValue + offset;
 
 print(result);
 

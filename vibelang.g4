@@ -8,7 +8,7 @@ statement
     | 'print' '(' expr ')' ';'  # PrintStmt
     ;
 
-type: 'int' | 'float';
+type: 'int32' | 'int64' | 'float32' | 'float64';
 
 expr
     // Multiplication and division have higher precedence

@@ -17,7 +17,6 @@ class CodeGenerator(vibelangVisitor):
     symbol_table: list[dict[str, dict[str, object]]]
     i32: ir.IntType
     printf: ir.Function
-    global_fmt_int: ir.GlobalVariable
 
     def __init__(self) -> None:
         """Initialize the LLVM module and target machine."""
@@ -37,7 +36,16 @@ class CodeGenerator(vibelangVisitor):
 
         # LLVM Types
         self.i32 = ir.IntType(32)
+        self.i64 = ir.IntType(64)
+        self.f32 = ir.FloatType()
         self.f64 = ir.DoubleType()
+
+        self.type_map = {
+            "int32": self.i32,
+            "int64": self.i64,
+            "float32": self.f32,
+            "float64": self.f64,
+        }
 
         # Printf function (external C function)
         printf_ty = ir.FunctionType(
@@ -45,31 +53,78 @@ class CodeGenerator(vibelangVisitor):
         )
         self.printf = ir.Function(self.module, printf_ty, name="printf")
 
-        # Format string for printf ("%d\n" for int)
-        fmt_str_int = "%d\n\0"
-        c_fmt_int = ir.Constant(
-            ir.ArrayType(ir.IntType(8), len(fmt_str_int)),
-            bytearray(fmt_str_int.encode("utf8")),
-        )
-        self.global_fmt_int = ir.GlobalVariable(
-            self.module, c_fmt_int.type, name="fmt_int"
-        )
-        self.global_fmt_int.linkage = "internal"
-        self.global_fmt_int.global_constant = True
-        self.global_fmt_int.initializer = c_fmt_int
+        self.fmt_int32 = self.create_fmt_string("fmt_int32", "%d")
+        self.fmt_int64 = self.create_fmt_string("fmt_int64", "%lld")
+        self.fmt_float32 = self.create_fmt_string("fmt_float32", "%f")
+        self.fmt_float64 = self.create_fmt_string("fmt_float64", "%lf")
 
-        # Format string for printf ("%f\n" for float)
-        fmt_str_float = "%f\n\0"
-        c_fmt_float = ir.Constant(
-            ir.ArrayType(ir.IntType(8), len(fmt_str_float)),
-            bytearray(fmt_str_float.encode("utf8")),
+    def create_fmt_string(self, name: str, fmt: str) -> ir.GlobalVariable:
+        fmt_str = f"{fmt}\n\0"
+        c_fmt = ir.Constant(
+            ir.ArrayType(ir.IntType(8), len(fmt_str)), bytearray(fmt_str.encode("utf8"))
         )
-        self.global_fmt_float = ir.GlobalVariable(
-            self.module, c_fmt_float.type, name="fmt_float"
-        )
-        self.global_fmt_float.linkage = "internal"
-        self.global_fmt_float.global_constant = True
-        self.global_fmt_float.initializer = c_fmt_float
+        glob = ir.GlobalVariable(self.module, c_fmt.type, name=name)
+        glob.linkage = "internal"
+        glob.global_constant = True
+        glob.initializer = c_fmt
+        return glob
+
+    def cast_to(self, val: ir.Value, target_type: ir.Type) -> ir.Value:  # noqa: PLR0911
+        """Automatic upcasting/downcasting to target type."""
+        if self.builder is None:
+            msg = "Semantic error: Cannot cast without a builder."
+            raise SemanticError(msg)
+
+        if val.type == target_type:
+            return val
+
+        # Int <-> Int
+        if isinstance(val.type, ir.IntType) and isinstance(target_type, ir.IntType):
+            if target_type.width > val.type.width:
+                return self.builder.sext(val, target_type)  # pyright: ignore[reportReturnType]
+            return self.builder.trunc(val, target_type)  # pyright: ignore[reportReturnType]
+
+        # Float <-> Float
+        if isinstance(val.type, (ir.FloatType, ir.DoubleType)) and isinstance(
+            target_type, (ir.FloatType, ir.DoubleType)
+        ):
+            if target_type == self.f64:
+                return self.builder.fpext(val, target_type)  # pyright: ignore[reportReturnType]
+            return self.builder.fptrunc(val, target_type)  # pyright: ignore[reportReturnType]
+
+        # Int -> Float
+        if isinstance(val.type, ir.IntType) and isinstance(
+            target_type, (ir.FloatType, ir.DoubleType)
+        ):
+            return self.builder.sitofp(val, target_type)  # pyright: ignore[reportReturnType]
+
+        # Float -> Int
+        if isinstance(val.type, (ir.FloatType, ir.DoubleType)) and isinstance(
+            target_type, ir.IntType
+        ):
+            return self.builder.fptosi(val, target_type)  # pyright: ignore[reportReturnType]
+
+        return val
+
+    def promote_types(
+        self, left: ir.Value, right: ir.Value
+    ) -> tuple[ir.Value, ir.Value]:
+        """Returns types of highest common precision."""
+        if left.type == right.type:
+            return left, right
+
+        types = {left.type, right.type}
+        # Precision hierarchy: float64 > float32 > int64 > int32
+        if self.f64 in types:
+            target = self.f64
+        elif self.f32 in types:
+            target = self.f32
+        elif self.i64 in types:
+            target = self.i64
+        else:
+            target = self.i32
+
+        return self.cast_to(left, target), self.cast_to(right, target)
 
     # --- SCOPE MANAGEMENT (Symbol Table) ---
     def current_scope(self) -> dict[str, dict[str, object]]:
@@ -79,22 +134,15 @@ class CodeGenerator(vibelangVisitor):
     def allocate_variable(self, name: str, var_type: str, line: int) -> ir.AllocaInstr:
         """Allocate memory for a variable."""
         if name in self.current_scope():
-            msg = f"Semantic error: Variable '{name}' already exists in this scope."
-            raise SemanticError(msg, line)
+            raise SemanticError(
+                f"Semantic error: Variable '{name}' already exists in this scope.", line
+            )
 
-        if var_type == "int":
-            llvm_type = self.i32
-        elif var_type == "float":
-            llvm_type = self.f64
-        else:
-            msg = f"Semantic error: Unsupported type '{var_type}'."
-            raise SemanticError(msg, line)
+        if var_type not in self.type_map:
+            raise SemanticError(f"Semantic error: Unsupported type '{var_type}'.", line)
 
-        if self.builder is None:
-            msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg, line)
-
-        ptr = self.builder.alloca(llvm_type, name=name)
+        llvm_type = self.type_map[var_type]
+        ptr = self.builder.alloca(llvm_type, name=name)  # pyright: ignore[reportOptionalMemberAccess]
         self.current_scope()[name] = {"ptr": ptr, "type": var_type}
         return ptr
 
@@ -154,11 +202,10 @@ class CodeGenerator(vibelangVisitor):
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
 
-        # Variable promotion
-        if var_type == "float" and val.type == self.i32:
-            val = self.builder.sitofp(val, self.f64)
-        elif var_type == "int" and val.type == self.f64:
-            val = self.builder.fptosi(val, self.i32)
+        # Determine target type
+
+        target_llvm_type = self.type_map[var_type]
+        val = self.cast_to(val, target_llvm_type)  # pyright: ignore[reportArgumentType]
 
         _ = self.builder.store(val, ptr)
         return None
@@ -187,10 +234,8 @@ class CodeGenerator(vibelangVisitor):
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
 
-        if var_info["type"] == "float" and val.type == self.i32:
-            val = self.builder.sitofp(val, self.f64)
-        elif var_info["type"] == "int" and val.type == self.f64:
-            val = self.builder.fptosi(val, self.i32)
+        target_llvm_type = self.type_map[str(var_info["type"])]
+        val = self.cast_to(val, target_llvm_type)  # pyright: ignore[reportArgumentType]
 
         _ = self.builder.store(val, ptr)
 
@@ -212,16 +257,16 @@ class CodeGenerator(vibelangVisitor):
             raise SemanticError(msg, ctx.start.line)
 
         if val.type == self.f64:
-            fmt_ptr = self.builder.bitcast(
-                self.global_fmt_float, ir.IntType(8).as_pointer()
-            )
-            val = self.builder.fpext(val, ir.DoubleType())
-        else:
-            fmt_ptr = self.builder.bitcast(
-                self.global_fmt_int, ir.IntType(8).as_pointer()
-            )
-            if val.type == ir.FloatType():
-                val = self.builder.fpext(val, ir.DoubleType())
+            fmt_ptr = self.builder.bitcast(self.fmt_float64, ir.IntType(8).as_pointer())
+        elif val.type == self.f32:
+            fmt_ptr = self.builder.bitcast(self.fmt_float32, ir.IntType(8).as_pointer())
+            val = self.builder.fpext(
+                val, self.f64
+            )  # C expects a float as a double in printf
+        elif val.type == self.i64:
+            fmt_ptr = self.builder.bitcast(self.fmt_int64, ir.IntType(8).as_pointer())
+        else:  # i32
+            fmt_ptr = self.builder.bitcast(self.fmt_int32, ir.IntType(8).as_pointer())
 
         _ = self.builder.call(self.printf, [fmt_ptr, val])
         return None
@@ -244,8 +289,13 @@ class CodeGenerator(vibelangVisitor):
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
 
-        typ = self.f64 if var_info["type"] == "float" else self.i32
-
+        self.type_map = {
+            "int32": self.i32,
+            "int64": self.i64,
+            "float32": self.f32,
+            "float64": self.f64,
+        }
+        typ = self.type_map[var_info["type"]]  # pyright: ignore[reportArgumentType]
         return self.builder.load(ptr, typ=typ, name=f"{var_name}_val")
 
     @override
@@ -271,12 +321,12 @@ class CodeGenerator(vibelangVisitor):
         if ctx.FLOAT() is None:
             msg = "Semantic error: Cannot recognize float."
             raise SemanticError(msg, ctx.start.line)
-        val = float(ctx.FLOAT().getText()) # pyright: ignore[reportOptionalMemberAccess]
+        val = float(ctx.FLOAT().getText())  # pyright: ignore[reportOptionalMemberAccess]
         return ir.Constant(self.f64, val)
 
     @override
     def visitParenExpr(self, ctx: vibelangParser.ParenExprContext) -> object:
-        return self.visit(ctx.expr()) # pyright: ignore[reportArgumentType]
+        return self.visit(ctx.expr())  # pyright: ignore[reportArgumentType]
 
     @override
     def visitAddSubExpr(self, ctx: vibelangParser.AddSubExprContext) -> object:
@@ -287,16 +337,12 @@ class CodeGenerator(vibelangVisitor):
         if self.builder is None:
             msg = "Semantic error: Builder is not initialized."
             raise SemanticError(msg, ctx.start.line)
-        left = self.visit(ctx.expr(0)) # pyright: ignore[reportArgumentType]
-        right = self.visit(ctx.expr(1)) # pyright: ignore[reportArgumentType]
+        left = self.visit(ctx.expr(0))  # pyright: ignore[reportArgumentType]
+        right = self.visit(ctx.expr(1))  # pyright: ignore[reportArgumentType]
         op = ctx.getChild(1).getText()
 
-        # Type promotion, if one of the arguments is float (int becomes float)
-        is_float = self.f64 in (left.type, right.type)
-        if left.type == self.i32 and right.type == self.f64:
-            left = self.builder.sitofp(left, self.f64)
-        if right.type == self.i32 and left.type == self.f64:
-            right = self.builder.sitofp(right, self.f64)
+        left, right = self.promote_types(left, right)  # pyright: ignore[reportArgumentType]
+        is_float = isinstance(left.type, (ir.FloatType, ir.DoubleType))
 
         if op == "+":
             if is_float:
@@ -315,15 +361,12 @@ class CodeGenerator(vibelangVisitor):
             msg = "Semantic error: Builder is not initialized."
             raise SemanticError(msg, ctx.start.line)
 
-        left = self.visit(ctx.expr(0)) # pyright: ignore[reportArgumentType]
-        right = self.visit(ctx.expr(1)) # pyright: ignore[reportArgumentType]
+        left = self.visit(ctx.expr(0))  # pyright: ignore[reportArgumentType]
+        right = self.visit(ctx.expr(1))  # pyright: ignore[reportArgumentType]
         op = ctx.getChild(1).getText()
 
-        is_float = self.f64 in (left.type, right.type)
-        if left.type == self.i32 and right.type == self.f64:
-            left = self.builder.sitofp(left, self.f64)
-        if right.type == self.i32 and left.type == self.f64:
-            right = self.builder.sitofp(right, self.f64)
+        left, right = self.promote_types(left, right)  # pyright: ignore[reportArgumentType]
+        is_float = isinstance(left.type, (ir.FloatType, ir.DoubleType))
 
         if op == "*":
             if is_float:

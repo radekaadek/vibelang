@@ -1,0 +1,12 @@
+int32 maly_int = 10;
+int64 duzy_int = 100;
+float32 maly_float = 1.5;
+float64 duzy_float = 2.5;
+
+print(maly_int + duzy_int);
+
+print(duzy_int + maly_float);
+
+print(maly_float * duzy_float);
+
+print((maly_int + duzy_int) / duzy_float);
