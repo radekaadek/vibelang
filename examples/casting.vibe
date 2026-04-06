@@ -1,0 +1,6 @@
+int a = 3.99;
+print(a);
+float b = 42;
+print(b);
+float c = a + b;
+print(c);

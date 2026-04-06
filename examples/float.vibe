@@ -1,0 +1,4 @@
+float pi = 3.1415;
+int promien = 5;
+float pole = pi * (promien * promien);
+print(pole);

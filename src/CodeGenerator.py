@@ -37,6 +37,7 @@ class CodeGenerator(vibelangVisitor):
 
         # LLVM Types
         self.i32 = ir.IntType(32)
+        self.f64 = ir.DoubleType()
 
         # Printf function (external C function)
         printf_ty = ir.FunctionType(
@@ -45,14 +46,30 @@ class CodeGenerator(vibelangVisitor):
         self.printf = ir.Function(self.module, printf_ty, name="printf")
 
         # Format string for printf ("%d\n" for int)
-        fmt_str = "%d\n\0"
-        c_fmt = ir.Constant(
-            ir.ArrayType(ir.IntType(8), len(fmt_str)), bytearray(fmt_str.encode("utf8"))
+        fmt_str_int = "%d\n\0"
+        c_fmt_int = ir.Constant(
+            ir.ArrayType(ir.IntType(8), len(fmt_str_int)),
+            bytearray(fmt_str_int.encode("utf8")),
         )
-        self.global_fmt_int = ir.GlobalVariable(self.module, c_fmt.type, name="fmt_int")
+        self.global_fmt_int = ir.GlobalVariable(
+            self.module, c_fmt_int.type, name="fmt_int"
+        )
         self.global_fmt_int.linkage = "internal"
         self.global_fmt_int.global_constant = True
-        self.global_fmt_int.initializer = c_fmt
+        self.global_fmt_int.initializer = c_fmt_int
+
+        # Format string for printf ("%f\n" for float)
+        fmt_str_float = "%f\n\0"
+        c_fmt_float = ir.Constant(
+            ir.ArrayType(ir.IntType(8), len(fmt_str_float)),
+            bytearray(fmt_str_float.encode("utf8")),
+        )
+        self.global_fmt_float = ir.GlobalVariable(
+            self.module, c_fmt_float.type, name="fmt_float"
+        )
+        self.global_fmt_float.linkage = "internal"
+        self.global_fmt_float.global_constant = True
+        self.global_fmt_float.initializer = c_fmt_float
 
     # --- SCOPE MANAGEMENT (Symbol Table) ---
     def current_scope(self) -> dict[str, dict[str, object]]:
@@ -65,11 +82,13 @@ class CodeGenerator(vibelangVisitor):
             msg = f"Semantic error: Variable '{name}' already exists in this scope."
             raise SemanticError(msg, line)
 
-        if var_type != "int":
-            msg = f"Semantic error: Unsupported type '{var_type}'. Only 'int' is currently supported."
+        if var_type == "int":
+            llvm_type = self.i32
+        elif var_type == "float":
+            llvm_type = self.f64
+        else:
+            msg = f"Semantic error: Unsupported type '{var_type}'."
             raise SemanticError(msg, line)
-
-        llvm_type = self.i32
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
@@ -134,6 +153,13 @@ class CodeGenerator(vibelangVisitor):
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
+
+        # Variable promotion
+        if var_type == "float" and val.type == self.i32:
+            val = self.builder.sitofp(val, self.f64)
+        elif var_type == "int" and val.type == self.f64:
+            val = self.builder.fptosi(val, self.i32)
+
         _ = self.builder.store(val, ptr)
         return None
 
@@ -160,7 +186,14 @@ class CodeGenerator(vibelangVisitor):
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
+
+        if var_info["type"] == "float" and val.type == self.i32:
+            val = self.builder.sitofp(val, self.f64)
+        elif var_info["type"] == "int" and val.type == self.f64:
+            val = self.builder.fptosi(val, self.i32)
+
         _ = self.builder.store(val, ptr)
+
         return None
 
     @override
@@ -178,7 +211,18 @@ class CodeGenerator(vibelangVisitor):
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
 
-        fmt_ptr = self.builder.bitcast(self.global_fmt_int, ir.IntType(8).as_pointer())
+        if val.type == self.f64:
+            fmt_ptr = self.builder.bitcast(
+                self.global_fmt_float, ir.IntType(8).as_pointer()
+            )
+            val = self.builder.fpext(val, ir.DoubleType())
+        else:
+            fmt_ptr = self.builder.bitcast(
+                self.global_fmt_int, ir.IntType(8).as_pointer()
+            )
+            if val.type == ir.FloatType():
+                val = self.builder.fpext(val, ir.DoubleType())
+
         _ = self.builder.call(self.printf, [fmt_ptr, val])
         return None
 
@@ -199,7 +243,10 @@ class CodeGenerator(vibelangVisitor):
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
-        return self.builder.load(ptr, name=f"{var_name}_val")
+
+        typ = self.f64 if var_info["type"] == "float" else self.i32
+
+        return self.builder.load(ptr, typ=typ, name=f"{var_name}_val")
 
     @override
     def visitIntExpr(self, ctx: vibelangParser.IntExprContext) -> object:
@@ -214,33 +261,74 @@ class CodeGenerator(vibelangVisitor):
         return ir.Constant(self.i32, val)
 
     @override
+    def visitFloatExpr(self, ctx: vibelangParser.FloatExprContext) -> object:
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
+        if ctx.FLOAT() is None:
+            msg = "Semantic error: Cannot recognize float."
+            raise SemanticError(msg, ctx.start.line)
+        if ctx.FLOAT() is None:
+            msg = "Semantic error: Cannot recognize float."
+            raise SemanticError(msg, ctx.start.line)
+        val = float(ctx.FLOAT().getText()) # pyright: ignore[reportOptionalMemberAccess]
+        return ir.Constant(self.f64, val)
+
+    @override
+    def visitParenExpr(self, ctx: vibelangParser.ParenExprContext) -> object:
+        return self.visit(ctx.expr()) # pyright: ignore[reportArgumentType]
+
+    @override
     def visitAddSubExpr(self, ctx: vibelangParser.AddSubExprContext) -> object:
         if ctx.start is None:
             msg = "Semantic error: Cannot recognize line number."
             raise SemanticError(msg)
-        expr_left = ctx.expr(0)
-        if expr_left is None:
-            msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg, ctx.start.line)
-        left = self.visit(expr_left)
-
-        expr_right = ctx.expr(1)
-        if expr_right is None:
-            msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg, ctx.start.line)
-        right = self.visit(expr_right)
-
-        op_node = ctx.getChild(1)
-        if op_node is None:
-            msg = "Semantic error: Cannot recognize operator."
-            raise SemanticError(msg, ctx.start.line)
-        op = op_node.getText()
 
         if self.builder is None:
-            msg = "Semantic error: Cannot allocate memory."
+            msg = "Semantic error: Builder is not initialized."
             raise SemanticError(msg, ctx.start.line)
+        left = self.visit(ctx.expr(0)) # pyright: ignore[reportArgumentType]
+        right = self.visit(ctx.expr(1)) # pyright: ignore[reportArgumentType]
+        op = ctx.getChild(1).getText()
+
+        # Type promotion, if one of the arguments is float (int becomes float)
+        is_float = self.f64 in (left.type, right.type)
+        if left.type == self.i32 and right.type == self.f64:
+            left = self.builder.sitofp(left, self.f64)
+        if right.type == self.i32 and left.type == self.f64:
+            right = self.builder.sitofp(right, self.f64)
 
         if op == "+":
+            if is_float:
+                return self.builder.fadd(left, right, name="faddtmp")
             return self.builder.add(left, right, name="addtmp")
-
+        if is_float:
+            return self.builder.fsub(left, right, name="fsubtmp")
         return self.builder.sub(left, right, name="subtmp")
+
+    @override
+    def visitMulDivExpr(self, ctx: vibelangParser.MulDivExprContext) -> object:
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
+        if self.builder is None:
+            msg = "Semantic error: Builder is not initialized."
+            raise SemanticError(msg, ctx.start.line)
+
+        left = self.visit(ctx.expr(0)) # pyright: ignore[reportArgumentType]
+        right = self.visit(ctx.expr(1)) # pyright: ignore[reportArgumentType]
+        op = ctx.getChild(1).getText()
+
+        is_float = self.f64 in (left.type, right.type)
+        if left.type == self.i32 and right.type == self.f64:
+            left = self.builder.sitofp(left, self.f64)
+        if right.type == self.i32 and left.type == self.f64:
+            right = self.builder.sitofp(right, self.f64)
+
+        if op == "*":
+            if is_float:
+                return self.builder.fmul(left, right, name="fmultmp")
+            return self.builder.mul(left, right, name="multmp")
+        if is_float:
+            return self.builder.fdiv(left, right, name="fdivtmp")
+        return self.builder.sdiv(left, right, name="divtmp")

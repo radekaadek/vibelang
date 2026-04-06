@@ -8,15 +8,20 @@ statement
     | 'print' '(' expr ')' ';'  # PrintStmt
     ;
 
-type: 'int';
+type: 'int' | 'float';
 
 expr
-    : expr ('+' | '-') expr     # AddSubExpr
+    // Multiplication and division have higher precedence
+    : expr ('*' | '/') expr     # MulDivExpr
+    | expr ('+' | '-') expr     # AddSubExpr
     | ID                        # IdExpr
     | INT                       # IntExpr
+    | FLOAT                     # FloatExpr
+    | '(' expr ')'              # ParenExpr
     ;
 
 // Lexer rules
+FLOAT: [0-9]+ '.' [0-9]+;
 INT: [0-9]+;
 ID: [a-zA-Z_][a-zA-Z0-9_]*;
 WS: [ \t\r\n]+ -> skip;
