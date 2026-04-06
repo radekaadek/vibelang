@@ -19,7 +19,7 @@ pip install -r requirements.txt
 ## Compiling
 
 ```bash
-python3 -m scripts.compiler -O 3 -v examples/complex.vibe
+python3 -m scripts.compiler -O 3 -v examples/simple.vibe
 ```
 
 ## Running
