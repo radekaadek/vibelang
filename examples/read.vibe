@@ -1,0 +1,13 @@
+int32 a = 0;
+read(a);
+int64 b = 0;
+read(b);
+float32 c = 0.0;
+read(c);
+float64 d = 0.0;
+read(d);
+print(a);
+print(b);
+print(c);
+print(d);
+

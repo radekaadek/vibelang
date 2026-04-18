@@ -58,8 +58,28 @@ class CodeGenerator(vibelangVisitor):
         self.fmt_float32 = self.create_fmt_string("fmt_float32", "%f")
         self.fmt_float64 = self.create_fmt_string("fmt_float64", "%lf")
 
+        # Scanf function (external C function)
+        scanf_ty = ir.FunctionType(self.i32, [ir.IntType(8).as_pointer()], var_arg=True)
+        self.scanf = ir.Function(self.module, scanf_ty, name="scanf")
+
+        self.sfmt_int32 = self.create_scanf_fmt_string("sfmt_int32", "%d")
+        self.sfmt_int64 = self.create_scanf_fmt_string("sfmt_int64", "%lld")
+        self.sfmt_float32 = self.create_scanf_fmt_string("sfmt_float32", "%f")
+        self.sfmt_float64 = self.create_scanf_fmt_string("sfmt_float64", "%lf")
+
     def create_fmt_string(self, name: str, fmt: str) -> ir.GlobalVariable:
         fmt_str = f"{fmt}\n\0"
+        c_fmt = ir.Constant(
+            ir.ArrayType(ir.IntType(8), len(fmt_str)), bytearray(fmt_str.encode("utf8"))
+        )
+        glob = ir.GlobalVariable(self.module, c_fmt.type, name=name)
+        glob.linkage = "internal"
+        glob.global_constant = True
+        glob.initializer = c_fmt
+        return glob
+
+    def create_scanf_fmt_string(self, name: str, fmt: str) -> ir.GlobalVariable:
+        fmt_str = f"{fmt}\0"
         c_fmt = ir.Constant(
             ir.ArrayType(ir.IntType(8), len(fmt_str)), bytearray(fmt_str.encode("utf8"))
         )
@@ -239,6 +259,44 @@ class CodeGenerator(vibelangVisitor):
 
         _ = self.builder.store(val, ptr)
 
+        return None
+
+    @override
+    def visitReadStmt(self, ctx: vibelangParser.ReadStmtContext) -> object:
+        if ctx.start is None:
+            msg = "Semantic error: Cannot recognize line number."
+            raise SemanticError(msg)
+
+        id_node = ctx.ID()
+        if id_node is None:
+            msg = "Semantic error: Cannot recognize variable name."
+            raise SemanticError(msg, ctx.start.line)
+
+        var_name = id_node.getText()
+
+        var_info = self.lookup_variable(var_name, ctx.start.line)
+        ptr = cast("ir.Value", var_info["ptr"])
+
+        if self.builder is None:
+            msg = "Semantic error: Cannot allocate memory."
+            raise SemanticError(msg, ctx.start.line)
+
+        var_type = str(var_info["type"])
+
+        if var_type == "float64":
+            fmt_ptr = self.builder.bitcast(
+                self.sfmt_float64, ir.IntType(8).as_pointer()
+            )
+        elif var_type == "float32":
+            fmt_ptr = self.builder.bitcast(
+                self.sfmt_float32, ir.IntType(8).as_pointer()
+            )
+        elif var_type == "int64":
+            fmt_ptr = self.builder.bitcast(self.sfmt_int64, ir.IntType(8).as_pointer())
+        else:  # int32
+            fmt_ptr = self.builder.bitcast(self.sfmt_int32, ir.IntType(8).as_pointer())
+
+        _ = self.builder.call(self.scanf, [fmt_ptr, ptr])
         return None
 
     @override

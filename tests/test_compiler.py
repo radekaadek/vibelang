@@ -25,7 +25,9 @@ EXPECTED_OUTPUTS = {
 
 
 @pytest.mark.parametrize("example_file, expected_output", EXPECTED_OUTPUTS.items())
-def test_valid_examples(example_file: str, expected_output: str, tmp_path: Path) -> None:
+def test_valid_examples(
+    example_file: str, expected_output: str, tmp_path: Path
+) -> None:
     """
     Test weryfikuje poprawne działanie operacji arytmetycznych, przypisań i wejścia-wyjścia.
     """
@@ -66,3 +68,36 @@ def test_semantic_error_redeclaration(tmp_path):
     )
 
     assert expected_error_msg in str(exc_info.value.__cause__)
+
+
+def test_read_statement(tmp_path: Path) -> None:
+    """
+    Test weryfikujący poprawne działanie instrukcji read() z klawiatury (stdin).
+    Oparty na pliku examples/read.vibe.
+    """
+    # 1. Wskazanie na plik w katalogu examples
+    vibe_file = EXAMPLES_DIR / "read.vibe"
+    output_ll = tmp_path / "output.ll"
+
+    # 2. Kompilacja do LLVM IR
+    compile_vibe(input_file=vibe_file, output=output_ll, opt_level=3, verbose=False)
+
+    # 3. Wykonanie programu z symulacją wejścia użytkownika
+    # Symulujemy wpisanie 4 różnych wartości oddzielonych enterami (\n)
+    simulated_user_input = "42\n8589934592\n3.14\n2.718281828\n"
+
+    run_process = subprocess.run(
+        ["lli", str(output_ll)],
+        input=simulated_user_input,  # Przekazanie danych do strumienia wejściowego
+        capture_output=True,
+        text=True,
+    )
+
+    assert run_process.returncode == 0, (
+        f"Błąd wykonania instrukcji read():\n{run_process.stderr}"
+    )
+
+    # 4. Weryfikacja zgodności wyjścia (floaty domyślnie wyświetlają 6 miejsc po przecinku)
+    expected_output = "42\n8589934592\n3.140000\n2.718282\n"
+
+    assert run_process.stdout == expected_output

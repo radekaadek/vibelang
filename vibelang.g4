@@ -6,6 +6,7 @@ statement
     : type ID '=' expr ';'      # VarDeclAssign
     | ID '=' expr ';'           # VarAssign
     | 'print' '(' expr ')' ';'  # PrintStmt
+    | 'read' '(' ID ')' ';'     # ReadStmt
     ;
 
 type: 'int32' | 'int64' | 'float32' | 'float64';
