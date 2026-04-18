@@ -21,6 +21,7 @@ EXPECTED_OUTPUTS = {
     "float.vibe": "78.537500\n",
     # Zaokrąglenia mogą się delikatnie różnić dla printf_formatting, ale poniższe wartości są typowe dla float64 w LLVM
     "printf_formatting.vibe": "42\n22\n3.140000\n2.718282\n",
+    "logic.vibe": "0\n1\n0\n1\n0\n1\n0\n1\n0\n0\n",  # <-- ADDED TEST CASE
 }
 
 

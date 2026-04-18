@@ -9,19 +9,25 @@ statement
     | 'read' '(' ID ')' ';'     # ReadStmt
     ;
 
-type: 'int32' | 'int64' | 'float32' | 'float64';
+type: 'int32' | 'int64' | 'float32' | 'float64' | 'bool';
 
 expr
     // Multiplication and division have higher precedence
-    : expr ('*' | '/') expr     # MulDivExpr
+    : 'not' expr                # NotExpr
+    | expr ('*' | '/') expr     # MulDivExpr
     | expr ('+' | '-') expr     # AddSubExpr
+    | expr 'and' expr           # AndExpr
+    | expr 'xor' expr           # XorExpr
+    | expr 'or' expr            # OrExpr
     | ID                        # IdExpr
     | INT                       # IntExpr
     | FLOAT                     # FloatExpr
+    | BOOL                    # BoolExpr
     | '(' expr ')'              # ParenExpr
     ;
 
 // Lexer rules
+BOOL: 'true' | 'false';
 FLOAT: [0-9]+ '.' [0-9]+;
 INT: [0-9]+;
 ID: [a-zA-Z_][a-zA-Z0-9_]*;

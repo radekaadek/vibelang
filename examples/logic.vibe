@@ -1,0 +1,18 @@
+bool t = true;
+bool f = false;
+
+print(t and f);
+print(t or f);
+print(t xor t);
+print(f xor t);
+print(not t);
+print(not f);
+
+int32 val1 = 5;
+float64 val2 = 0.0;
+
+print(val1 and val2);
+print(val1 or val2);
+print(not val1);
+
+print((t or f) and not (val1 xor val2));

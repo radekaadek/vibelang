@@ -35,12 +35,14 @@ class CodeGenerator(vibelangVisitor):
         self.symbol_table = [{}]
 
         # LLVM Types
+        self.i1 = ir.IntType(1)
         self.i32 = ir.IntType(32)
         self.i64 = ir.IntType(64)
         self.f32 = ir.FloatType()
         self.f64 = ir.DoubleType()
 
         self.type_map = {
+            "bool": self.i1,
             "int32": self.i32,
             "int64": self.i64,
             "float32": self.f32,
@@ -53,6 +55,8 @@ class CodeGenerator(vibelangVisitor):
         )
         self.printf = ir.Function(self.module, printf_ty, name="printf")
 
+        self.fmt_bool = self.create_fmt_string("fmt_bool", "%d")
+        self.sfmt_bool = self.create_scanf_fmt_string("sfmt_bool", "%d")
         self.fmt_int32 = self.create_fmt_string("fmt_int32", "%d")
         self.fmt_int64 = self.create_fmt_string("fmt_int64", "%lld")
         self.fmt_float32 = self.create_fmt_string("fmt_float32", "%f")
@@ -293,6 +297,18 @@ class CodeGenerator(vibelangVisitor):
             )
         elif var_type == "int64":
             fmt_ptr = self.builder.bitcast(self.sfmt_int64, ir.IntType(8).as_pointer())
+        elif var_type == "bool":
+            # Temporary i32 allocation, to scanf with '%d'
+            tmp_ptr = self.builder.alloca(self.i32, name="bool_tmp_ptr")
+            fmt_ptr = self.builder.bitcast(self.sfmt_bool, ir.IntType(8).as_pointer())
+            _ = self.builder.call(self.scanf, [fmt_ptr, tmp_ptr])
+            loaded_tmp = self.builder.load(tmp_ptr)
+
+            bool_val = self.builder.icmp_unsigned(
+                "!=", loaded_tmp, ir.Constant(self.i32, 0)
+            )
+            _ = self.builder.store(bool_val, ptr)
+            return None
         else:  # int32
             fmt_ptr = self.builder.bitcast(self.sfmt_int32, ir.IntType(8).as_pointer())
 
@@ -323,11 +339,86 @@ class CodeGenerator(vibelangVisitor):
             )  # C expects a float as a double in printf
         elif val.type == self.i64:
             fmt_ptr = self.builder.bitcast(self.fmt_int64, ir.IntType(8).as_pointer())
+        elif val.type == self.i1:
+              # Convert to int32 for '%d' with printf
+            fmt_ptr = self.builder.bitcast(self.fmt_bool, ir.IntType(8).as_pointer())
+            val = self.builder.zext(
+                val, self.i32
+            )
         else:  # i32
             fmt_ptr = self.builder.bitcast(self.fmt_int32, ir.IntType(8).as_pointer())
 
         _ = self.builder.call(self.printf, [fmt_ptr, val])
         return None
+
+    def to_bool(self, val: ir.Value, line: int) -> ir.Value:
+        """Helper converting other types to bool"""
+        if val.type == self.i1:
+            return val
+
+        if isinstance(val.type, ir.IntType):
+            return self.builder.icmp_unsigned(
+                "!=", val, ir.Constant(val.type, 0), name="tobool"
+            )
+
+        if isinstance(val.type, (ir.FloatType, ir.DoubleType)):
+            return self.builder.fcmp_ordered(
+                "!=", val, ir.Constant(val.type, 0.0), name="tobool"
+            )
+
+        raise SemanticError("Semantic error: Cannot convert type to bool.", line)
+
+    @override
+    def visitBoolExpr(self, ctx: vibelangParser.BoolExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        val_str = ctx.BOOL().getText()
+        val = 1 if val_str == "true" else 0
+        return ir.Constant(self.i1, val)
+
+    @override
+    def visitNotExpr(self, ctx: vibelangParser.NotExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        val = self.visit(ctx.expr())
+        bool_val = self.to_bool(val, ctx.start.line)
+        return self.builder.not_(bool_val, name="nottmp")
+
+    @override
+    def visitAndExpr(self, ctx: vibelangParser.AndExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        left = self.visit(ctx.expr(0))
+        right = self.visit(ctx.expr(1))
+
+        left_bool = self.to_bool(left, ctx.start.line)
+        right_bool = self.to_bool(right, ctx.start.line)
+
+        return self.builder.and_(left_bool, right_bool, name="andtmp")
+
+    @override
+    def visitOrExpr(self, ctx: vibelangParser.OrExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        left = self.visit(ctx.expr(0))
+        right = self.visit(ctx.expr(1))
+
+        left_bool = self.to_bool(left, ctx.start.line)
+        right_bool = self.to_bool(right, ctx.start.line)
+
+        return self.builder.or_(left_bool, right_bool, name="ortmp")
+
+    @override
+    def visitXorExpr(self, ctx: vibelangParser.XorExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        left = self.visit(ctx.expr(0))
+        right = self.visit(ctx.expr(1))
+
+        left_bool = self.to_bool(left, ctx.start.line)
+        right_bool = self.to_bool(right, ctx.start.line)
+
+        return self.builder.xor(left_bool, right_bool, name="xortmp")
 
     @override
     def visitIdExpr(self, ctx: vibelangParser.IdExprContext) -> object:
@@ -347,12 +438,6 @@ class CodeGenerator(vibelangVisitor):
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
 
-        self.type_map = {
-            "int32": self.i32,
-            "int64": self.i64,
-            "float32": self.f32,
-            "float64": self.f64,
-        }
         typ = self.type_map[var_info["type"]]  # pyright: ignore[reportArgumentType]
         return self.builder.load(ptr, typ=typ, name=f"{var_name}_val")
 
