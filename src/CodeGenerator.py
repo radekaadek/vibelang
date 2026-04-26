@@ -14,7 +14,7 @@ binding.initialize_native_asmprinter()
 class CodeGenerator(vibelangVisitor):
     module: ir.Module
     builder: ir.IRBuilder | None
-    symbol_table: list[dict[str, dict[str, object]]]
+    symbol_table: dict[str, dict[str, object]]
     i32: ir.IntType
     printf: ir.Function
 
@@ -32,7 +32,7 @@ class CodeGenerator(vibelangVisitor):
 
         self.builder = None
 
-        self.symbol_table = [{}]
+        self.symbol_table = {}
 
         # LLVM Types
         self.i1 = ir.IntType(1)
@@ -150,16 +150,11 @@ class CodeGenerator(vibelangVisitor):
 
         return self.cast_to(left, target), self.cast_to(right, target)
 
-    # --- SCOPE MANAGEMENT (Symbol Table) ---
-    def current_scope(self) -> dict[str, dict[str, object]]:
-        """Return the current symbol table."""
-        return self.symbol_table[-1]
-
     def allocate_variable(self, name: str, var_type: str, line: int) -> ir.AllocaInstr:
         """Allocate memory for a variable."""
-        if name in self.current_scope():
+        if name in self.symbol_table:
             raise SemanticError(
-                f"Semantic error: Variable '{name}' already exists in this scope.", line
+                f"Semantic error: Variable '{name}' already exists.", line
             )
 
         if var_type not in self.type_map:
@@ -167,14 +162,14 @@ class CodeGenerator(vibelangVisitor):
 
         llvm_type = self.type_map[var_type]
         ptr = self.builder.alloca(llvm_type, name=name)  # pyright: ignore[reportOptionalMemberAccess]
-        self.current_scope()[name] = {"ptr": ptr, "type": var_type}
+        self.symbol_table[name] = {"ptr": ptr, "type": var_type}
         return ptr
 
     def lookup_variable(self, name: str, line: int) -> dict[str, object]:
-        """Lookup a variable in the current scope."""
-        for scope in reversed(self.symbol_table):
-            if name in scope:
-                return scope[name]
+        """Lookup a variable."""
+        if name in self.symbol_table:
+            return self.symbol_table[name]
+
         msg = f"Semantic error: Undeclared variable '{name}'."
         raise SemanticError(msg, line)
 
@@ -340,11 +335,9 @@ class CodeGenerator(vibelangVisitor):
         elif val.type == self.i64:
             fmt_ptr = self.builder.bitcast(self.fmt_int64, ir.IntType(8).as_pointer())
         elif val.type == self.i1:
-              # Convert to int32 for '%d' with printf
+            # Convert to int32 for '%d' with printf
             fmt_ptr = self.builder.bitcast(self.fmt_bool, ir.IntType(8).as_pointer())
-            val = self.builder.zext(
-                val, self.i32
-            )
+            val = self.builder.zext(val, self.i32)
         else:  # i32
             fmt_ptr = self.builder.bitcast(self.fmt_int32, ir.IntType(8).as_pointer())
 
@@ -373,7 +366,7 @@ class CodeGenerator(vibelangVisitor):
         if ctx.start is None:
             raise SemanticError("Semantic error: Cannot recognize line number.")
         val_str = ctx.BOOL().getText()
-        val = 1 if val_str == "true" else 0
+        val = 1 if val_str == "true" else 0 # correct due to grammar
         return ir.Constant(self.i1, val)
 
     @override
@@ -432,7 +425,7 @@ class CodeGenerator(vibelangVisitor):
         var_name = id_node.getText()
 
         var_info = self.lookup_variable(var_name, ctx.start.line)
-        ptr = cast("ir.Value", var_info["ptr"])
+        ptr = cast("ir.Value", var_info["ptr"]) # ptr to look up memory address
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."

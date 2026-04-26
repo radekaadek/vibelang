@@ -63,10 +63,8 @@ def test_semantic_error_redeclaration(tmp_path):
     with pytest.raises(click.Abort) as exc_info:
         compile_vibe(input_file=vibe_file, output=output_ll, opt_level=3, verbose=False)
 
-    # Sprawdzenie czy w oryginalnym wyjątku (SemanticError) znalazła się odpowiednia wiadomość
-    expected_error_msg = (
-        "Semantic error: Variable 'licznik' already exists in this scope."
-    )
+    # Zaktualizowana oczekiwana wiadomość błędu
+    expected_error_msg = "Semantic error: Variable 'licznik' already exists."
 
     assert expected_error_msg in str(exc_info.value.__cause__)
 
