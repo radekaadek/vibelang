@@ -8,6 +8,7 @@ statement
     | 'print' '(' expr ')' ';'          # PrintStmt
     | 'read' '(' ID ')' ';'             # ReadStmt
     | 'if' expr 'then' statement* ('else' statement*)? 'end' # IfStmt
+    | 'while' expr 'do' statement* 'end'     # WhileStmt
     ;
 
 type: 'int32' | 'int64' | 'float32' | 'float64' | 'bool';
@@ -17,6 +18,7 @@ expr
     : 'not' expr                # NotExpr
     | expr ('*' | '/') expr     # MulDivExpr
     | expr ('+' | '-') expr     # AddSubExpr
+    | expr ('<' | '<=' | '>' | '>=' | '==' | '!=') expr # RelExpr
     | expr 'and' expr           # AndExpr
     | expr 'xor' expr           # XorExpr
     | expr 'or' expr            # OrExpr

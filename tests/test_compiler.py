@@ -24,6 +24,7 @@ EXPECTED_OUTPUTS = {
     "logic.vibe": "0\n1\n0\n1\n0\n1\n0\n1\n0\n0\n",  # <-- ADDED TEST CASE
     "if.vibe": "1\n1\n",
     "if_else.vibe": "1\n1\n0\n0\n",
+    "relations.vibe": "1\n0\n1\n0\n1\n0\n1\n1\n0\n1\n0\n1\n1\n0\n1\n0\n1\n100\n200\n10\n5\n",
 }
 
 

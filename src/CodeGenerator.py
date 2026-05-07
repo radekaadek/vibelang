@@ -397,6 +397,56 @@ class CodeGenerator(vibelangVisitor):
 
         self.builder.position_at_end(merge_block)
 
+    @override
+    def visitRelExpr(self, ctx: vibelangParser.RelExprContext):
+        if self.builder is None:
+            raise SemanticError("Semantic error: Cannot allocate memory.", ctx.start.line)
+        left_val = self.visit(ctx.expr(0))
+        right_val = self.visit(ctx.expr(1))
+
+        if left_val is None or right_val is None:
+            raise SemanticError("Semantic error: Invalid operand in relational expression.", ctx.start.line)
+
+        operator = ctx.getChild(1).getText()
+        try:
+            return self.builder.icmp_signed(operator, left_val, right_val, name="rel_cmp")
+        except ValueError:
+            raise SemanticError(f"Semantic error: Unsupported relational operator '{operator}'.", ctx.start.line)
+
+    @override
+    def visitWhileStmt(self, ctx: vibelangParser.WhileStmtContext):
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+
+        if self.builder is None:
+            raise SemanticError("Semantic error: Cannot allocate memory.", ctx.start.line)
+
+        cond_block = self.builder.append_basic_block("while.cond")
+        body_block = self.builder.append_basic_block("while.body")
+        end_block = self.builder.append_basic_block("while.end")
+
+        self.builder.branch(cond_block)
+
+        self.builder.position_at_end(cond_block)
+        
+        expr_ctx = ctx.expr()
+        if expr_ctx is None:
+            raise SemanticError("Semantic error: Cannot recognize expression.", ctx.start.line)
+            
+        cond_val = self.visit(expr_ctx)
+        
+        self.builder.cbranch(cond_val, body_block, end_block)
+
+        self.builder.position_at_end(body_block)
+        
+        for stmt in ctx.statement():
+            self.visit(stmt)
+            
+        if not self.builder.block.is_terminated:
+            self.builder.branch(cond_block)
+
+        self.builder.position_at_end(end_block)
+
     def to_bool(self, val: ir.Value, line: int) -> ir.Value:
         """Helper converting other types to bool"""
         if val.type == self.i1:

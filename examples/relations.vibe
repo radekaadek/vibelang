@@ -1,0 +1,49 @@
+int32 x = 10;
+int32 y = 20;
+int32 x_copy = 10;
+int32 neg_val = 0 - 5; 
+int32 zero = 0;
+
+print(x == x_copy); 
+print(x == y);     
+print(x != y);      
+print(x != x_copy); 
+
+print(x < y);      
+print(y < x);      
+print(x <= x_copy);
+print(x <= y);    
+print(y <= x);   
+
+print(y > x);    
+print(x > y);   
+print(y >= x_copy);
+print(x_copy >= x);
+print(x >= y);    
+
+print(neg_val < zero);
+print(neg_val > x);  
+print(zero != neg_val);
+
+if x < y then
+    print(100);
+    
+    if x == x_copy then
+        print(200); 
+    else
+        print(999);
+    end
+else
+    print(999); 
+end
+
+int32 counter = 0;
+int32 sum = 0;
+
+while counter < 5 do
+    sum = sum + counter;
+    counter = counter + 1;
+end
+
+print(sum);     
+print(counter); 
