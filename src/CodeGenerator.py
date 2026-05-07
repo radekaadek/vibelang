@@ -344,6 +344,59 @@ class CodeGenerator(vibelangVisitor):
         _ = self.builder.call(self.printf, [fmt_ptr, val])
         return None
 
+    @override
+    def visitIfStmt(self, ctx: vibelangParser.IfStmtContext):
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        expr_ctx = ctx.expr()
+        if expr_ctx is None:
+            raise SemanticError("Semantic error: Cannot recognize expression.", ctx.start.line)
+        cond_val = self.visit(expr_ctx)
+        if self.builder is None:
+            raise SemanticError("Semantic error: Cannot allocate memory.", ctx.start.line)
+
+        then_stmts = []
+        else_stmts = []
+        in_else = False
+        
+        for i in range(ctx.getChildCount()):
+            child = ctx.getChild(i)
+            if child.getText() == 'else':
+                in_else = True
+            elif isinstance(child, vibelangParser.StatementContext):
+                if in_else:
+                    else_stmts.append(child)
+                else:
+                    then_stmts.append(child)
+
+        has_else = in_else
+        then_block = self.builder.append_basic_block("if.then")
+        if has_else:
+            else_block = self.builder.append_basic_block("if.else")
+        merge_block = self.builder.append_basic_block("if.end")
+
+        if has_else:
+            self.builder.cbranch(cond_val, then_block, else_block)
+        else:
+            self.builder.cbranch(cond_val, then_block, merge_block)
+
+        self.builder.position_at_end(then_block)
+        for stmt in then_stmts:
+            self.visit(stmt)
+        
+        if not self.builder.block.is_terminated:
+            self.builder.branch(merge_block)
+
+        if has_else:
+            self.builder.position_at_end(else_block)
+            for stmt in else_stmts:
+                self.visit(stmt)
+            
+            if not self.builder.block.is_terminated:
+                self.builder.branch(merge_block)
+
+        self.builder.position_at_end(merge_block)
+
     def to_bool(self, val: ir.Value, line: int) -> ir.Value:
         """Helper converting other types to bool"""
         if val.type == self.i1:
@@ -511,3 +564,4 @@ class CodeGenerator(vibelangVisitor):
         if is_float:
             return self.builder.fdiv(left, right, name="fdivtmp")
         return self.builder.sdiv(left, right, name="divtmp")
+

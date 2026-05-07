@@ -3,10 +3,11 @@ grammar vibelang;
 program: statement* EOF;
 
 statement
-    : type ID '=' expr ';'      # VarDeclAssign
-    | ID '=' expr ';'           # VarAssign
-    | 'print' '(' expr ')' ';'  # PrintStmt
-    | 'read' '(' ID ')' ';'     # ReadStmt
+    : type ID '=' expr ';'              # VarDeclAssign
+    | ID '=' expr ';'                   # VarAssign
+    | 'print' '(' expr ')' ';'          # PrintStmt
+    | 'read' '(' ID ')' ';'             # ReadStmt
+    | 'if' expr 'then' statement* ('else' statement*)? 'end' # IfStmt
     ;
 
 type: 'int32' | 'int64' | 'float32' | 'float64' | 'bool';
@@ -22,7 +23,7 @@ expr
     | ID                        # IdExpr
     | INT                       # IntExpr
     | FLOAT                     # FloatExpr
-    | BOOL                    # BoolExpr
+    | BOOL                      # BoolExpr
     | '(' expr ')'              # ParenExpr
     ;
 

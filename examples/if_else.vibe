@@ -1,0 +1,18 @@
+int32 a = 1;
+int32 b = 0;
+
+bool condition = true;
+print(condition)
+if condition then
+	print(a);
+else
+	print(b)
+end
+
+condition = not condition;
+print(condition)
+if condition then
+	print(a);
+else
+	print(b)
+end
