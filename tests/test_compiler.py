@@ -25,6 +25,9 @@ EXPECTED_OUTPUTS = {
     "if.vibe": "1\n1\n",
     "if_else.vibe": "1\n1\n0\n0\n",
     "relations.vibe": "1\n0\n1\n0\n1\n0\n1\n1\n0\n1\n0\n1\n1\n0\n1\n0\n1\n100\n200\n10\n5\n",
+    "relations_type.vibe": "1\n1\n0\n1\n1\n1\n0\n1\n0\n1\n0\n1\n1\n",
+    "relations_mixed.vibe": "1\n1\n0\n1\n0\n1\n0\n1\n1\n0\n999\n",
+    "local_variables.vibe": "32\n5\n64\n64\n12\n24\n12\n24\n7\n",
 }
 
 
@@ -67,7 +70,8 @@ def test_semantic_error_redeclaration(tmp_path):
         compile_vibe(input_file=vibe_file, output=output_ll, opt_level=3, verbose=False)
 
     # Zaktualizowana oczekiwana wiadomość błędu
-    expected_error_msg = "Semantic error: Variable 'licznik' already exists."
+    # expected_error_msg = "Semantic error: Variable 'licznik' already exists."
+    expected_error_msg = "Semantic error: Variable 'licznik' already exists in this scope."
 
     assert expected_error_msg in str(exc_info.value.__cause__)
 

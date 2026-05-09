@@ -1,0 +1,25 @@
+int32 i1 = 10;
+int32 i2 = 0 - 5;
+int32 i3 = 0;
+
+float64 d1 = 10.5;
+float64 d2 = 10.0;
+float64 d3 = 0 - 5.5;
+float64 d4 = 0.0;
+
+print(i1 < d1);   
+print(i1 == d2);  
+print(i1 > d1);   
+print(d1 >= i1);  
+print(d2 != i1);  
+
+print(i2 > d3);   
+print(i2 <= d3);  
+print(d3 < i2);   
+
+print(i3 == d4);  
+print(i3 != d4);  
+
+if i1 < d1 then
+    print(999);
+end

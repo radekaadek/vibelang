@@ -14,7 +14,7 @@ binding.initialize_native_asmprinter()
 class CodeGenerator(vibelangVisitor):
     module: ir.Module
     builder: ir.IRBuilder | None
-    symbol_table: dict[str, dict[str, object]]
+    symbol_table_stack: list[dict[str, dict[str, object]]]
     i32: ir.IntType
     printf: ir.Function
 
@@ -32,7 +32,7 @@ class CodeGenerator(vibelangVisitor):
 
         self.builder = None
 
-        self.symbol_table = {}
+        self.symbol_table_stack = [{}]
 
         # LLVM Types
         self.i1 = ir.IntType(1)
@@ -70,6 +70,16 @@ class CodeGenerator(vibelangVisitor):
         self.sfmt_int64 = self.create_scanf_fmt_string("sfmt_int64", "%lld")
         self.sfmt_float32 = self.create_scanf_fmt_string("sfmt_float32", "%f")
         self.sfmt_float64 = self.create_scanf_fmt_string("sfmt_float64", "%lf")
+
+    @property
+    def current_scope(self) -> dict[str, dict[str, object]]:
+        return self.symbol_table_stack[-1]
+
+    def enter_scope(self) -> None:
+        self.symbol_table_stack.append({})
+
+    def exit_scope(self) -> None:
+        _ = self.symbol_table_stack.pop()
 
     def create_fmt_string(self, name: str, fmt: str) -> ir.GlobalVariable:
         fmt_str = f"{fmt}\n\0"
@@ -152,27 +162,24 @@ class CodeGenerator(vibelangVisitor):
 
     def allocate_variable(self, name: str, var_type: str, line: int) -> ir.AllocaInstr:
         """Allocate memory for a variable."""
-        if name in self.symbol_table:
-            raise SemanticError(
-                f"Semantic error: Variable '{name}' already exists.", line
-            )
+        if name in self.current_scope:
+            raise SemanticError(f"Semantic error: Variable '{name}' already exists in this scope.", line)
 
         if var_type not in self.type_map:
             raise SemanticError(f"Semantic error: Unsupported type '{var_type}'.", line)
 
         llvm_type = self.type_map[var_type]
         ptr = self.builder.alloca(llvm_type, name=name)  # pyright: ignore[reportOptionalMemberAccess]
-        self.symbol_table[name] = {"ptr": ptr, "type": var_type}
+        self.current_scope[name] = {"ptr": ptr, "type": var_type}
         return ptr
 
     def lookup_variable(self, name: str, line: int) -> dict[str, object]:
         """Lookup a variable."""
-        if name in self.symbol_table:
-            return self.symbol_table[name]
+        for scope in reversed(self.symbol_table_stack):
+            if name in scope:
+                return scope[name]
 
-        msg = f"Semantic error: Undeclared variable '{name}'."
-        raise SemanticError(msg, line)
-
+        raise SemanticError(f"Semantic error: Undeclared variable '{name}'.", line)
     # --- AST NODE VISITING ---
 
     @override
@@ -348,10 +355,14 @@ class CodeGenerator(vibelangVisitor):
     def visitIfStmt(self, ctx: vibelangParser.IfStmtContext):
         if ctx.start is None:
             raise SemanticError("Semantic error: Cannot recognize line number.")
+        
         expr_ctx = ctx.expr()
         if expr_ctx is None:
             raise SemanticError("Semantic error: Cannot recognize expression.", ctx.start.line)
+        
         cond_val = self.visit(expr_ctx)
+        cond_val = self.to_bool(cond_val, ctx.start.line)
+
         if self.builder is None:
             raise SemanticError("Semantic error: Cannot allocate memory.", ctx.start.line)
 
@@ -370,9 +381,9 @@ class CodeGenerator(vibelangVisitor):
                     then_stmts.append(child)
 
         has_else = in_else
+        
         then_block = self.builder.append_basic_block("if.then")
-        if has_else:
-            else_block = self.builder.append_basic_block("if.else")
+        else_block = self.builder.append_basic_block("if.else") if has_else else None
         merge_block = self.builder.append_basic_block("if.end")
 
         if has_else:
@@ -381,35 +392,47 @@ class CodeGenerator(vibelangVisitor):
             self.builder.cbranch(cond_val, then_block, merge_block)
 
         self.builder.position_at_end(then_block)
+        self.enter_scope()  
         for stmt in then_stmts:
             self.visit(stmt)
+        self.exit_scope()   
         
         if not self.builder.block.is_terminated:
             self.builder.branch(merge_block)
 
-        if has_else:
+        if has_else and else_block:
             self.builder.position_at_end(else_block)
+            self.enter_scope()
             for stmt in else_stmts:
                 self.visit(stmt)
+            self.exit_scope() 
             
             if not self.builder.block.is_terminated:
                 self.builder.branch(merge_block)
 
-        self.builder.position_at_end(merge_block)
+        self.builder.position_at_end(merge_block)    
 
     @override
     def visitRelExpr(self, ctx: vibelangParser.RelExprContext):
         if self.builder is None:
             raise SemanticError("Semantic error: Cannot allocate memory.", ctx.start.line)
+        
         left_val = self.visit(ctx.expr(0))
         right_val = self.visit(ctx.expr(1))
 
         if left_val is None or right_val is None:
             raise SemanticError("Semantic error: Invalid operand in relational expression.", ctx.start.line)
 
+        left_val, right_val = self.promote_types(left_val, right_val)
+        
+        is_float = isinstance(left_val.type, (ir.FloatType, ir.DoubleType))
+
         operator = ctx.getChild(1).getText()
+        
         try:
-            return self.builder.icmp_signed(operator, left_val, right_val, name="rel_cmp")
+            if is_float:
+                return self.builder.fcmp_ordered(operator, left_val, right_val, name="rel_fcmp")
+            return self.builder.icmp_signed(operator, left_val, right_val, name="rel_icmp")
         except ValueError:
             raise SemanticError(f"Semantic error: Unsupported relational operator '{operator}'.", ctx.start.line)
 
@@ -428,19 +451,21 @@ class CodeGenerator(vibelangVisitor):
         self.builder.branch(cond_block)
 
         self.builder.position_at_end(cond_block)
-        
         expr_ctx = ctx.expr()
         if expr_ctx is None:
             raise SemanticError("Semantic error: Cannot recognize expression.", ctx.start.line)
             
         cond_val = self.visit(expr_ctx)
+        cond_val = self.to_bool(cond_val, ctx.start.line)
         
         self.builder.cbranch(cond_val, body_block, end_block)
 
         self.builder.position_at_end(body_block)
         
+        self.enter_scope() 
         for stmt in ctx.statement():
             self.visit(stmt)
+        self.exit_scope()
             
         if not self.builder.block.is_terminated:
             self.builder.branch(cond_block)

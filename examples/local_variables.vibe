@@ -1,0 +1,26 @@
+int32 a = 5;
+if true then
+	int32 a = 32;
+	print(a);
+end
+print(a);
+
+if true then
+	a = 64;
+	print(a);
+end
+print(a);
+
+int32 b = 2;
+int32 c = 7;
+
+while b > 0 do
+	int32 c = 12;
+	print(c);
+
+	c = c * 2;
+	print(c);
+	b = b - 1;
+end
+print(c);
+
