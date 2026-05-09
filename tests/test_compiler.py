@@ -28,6 +28,7 @@ EXPECTED_OUTPUTS = {
     "relations_type.vibe": "1\n1\n0\n1\n1\n1\n0\n1\n0\n1\n0\n1\n1\n",
     "relations_mixed.vibe": "1\n1\n0\n1\n0\n1\n0\n1\n1\n0\n999\n",
     "local_variables.vibe": "32\n5\n64\n64\n12\n24\n12\n24\n7\n",
+    "function.vibe": "99999\n12\n99999\n120\n"
 }
 
 

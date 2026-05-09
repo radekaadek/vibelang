@@ -71,6 +71,8 @@ class CodeGenerator(vibelangVisitor):
         self.sfmt_float32 = self.create_scanf_fmt_string("sfmt_float32", "%f")
         self.sfmt_float64 = self.create_scanf_fmt_string("sfmt_float64", "%lf")
 
+        self.current_function_return_type: ir.Type | None = None
+
     @property
     def current_scope(self) -> dict[str, dict[str, object]]:
         return self.symbol_table_stack[-1]
@@ -639,4 +641,187 @@ class CodeGenerator(vibelangVisitor):
         if is_float:
             return self.builder.fdiv(left, right, name="fdivtmp")
         return self.builder.sdiv(left, right, name="divtmp")
+    
+    @override
+    def visitFunctionDefinition(self, ctx: vibelangParser.FunctionDefinitionContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
 
+        func_name = ctx.ID().getText()
+
+        return_type_ctx = ctx.returnType()
+        if return_type_ctx is None:
+            raise SemanticError("Semantic error: Cannot recognize return type.", ctx.start.line)
+            
+        ret_type_str = return_type_ctx.getText()
+        if ret_type_str == 'void':
+            ret_llvm_type = ir.VoidType()
+        else:
+            if ret_type_str not in self.type_map:
+                raise SemanticError(f"Semantic error: Unsupported return type '{ret_type_str}'.", ctx.start.line)
+            ret_llvm_type = self.type_map[ret_type_str]
+
+        param_llvm_types = []
+        param_names = []
+        param_type_strs = []
+
+        params_ctx = ctx.parameters()
+        if params_ctx is not None:
+            for p_ctx in params_ctx.parameter():
+                p_type_str = p_ctx.type_().getText()
+                p_name = p_ctx.ID().getText()
+
+                if p_type_str not in self.type_map:
+                    raise SemanticError(f"Semantic error: Unsupported parameter type '{p_type_str}'.", ctx.start.line)
+
+                param_llvm_types.append(self.type_map[p_type_str])
+                param_names.append(p_name)
+                param_type_strs.append(p_type_str)
+
+        func_type = ir.FunctionType(ret_llvm_type, param_llvm_types)
+
+        if func_name in self.module.globals:
+            raise SemanticError(f"Semantic error: Function '{func_name}' is already defined.", ctx.start.line)
+
+        func = ir.Function(self.module, func_type, name=func_name)
+
+        for arg, name in zip(func.args, param_names):
+            arg.name = name
+
+        saved_builder = self.builder
+
+        block = func.append_basic_block(name="entry")
+        self.builder = ir.IRBuilder(block)
+
+        self.enter_scope()
+
+        self.current_function_return_type = ret_llvm_type
+
+        for arg, name, type_str in zip(func.args, param_names, param_type_strs):
+            ptr = self.allocate_variable(name, type_str, ctx.start.line)
+            self.builder.store(arg, ptr)
+
+        for stmt in ctx.statement():
+            self.visit(stmt)
+
+        if not self.builder.block.is_terminated:
+            if isinstance(ret_llvm_type, ir.VoidType):
+                self.builder.ret_void()
+            else:
+                if isinstance(ret_llvm_type, (ir.FloatType, ir.DoubleType)):
+                    self.builder.ret(ir.Constant(ret_llvm_type, 0.0))
+                else:
+                    self.builder.ret(ir.Constant(ret_llvm_type, 0))
+
+        self.current_function_return_type = None
+
+        self.exit_scope()
+        self.builder = saved_builder
+
+        return None
+
+    @override
+    def visitReturnStmt(self, ctx: vibelangParser.ReturnStmtContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+
+        if self.current_function_return_type is None:
+            raise SemanticError("Semantic error: 'return' statement is only allowed inside functions.", ctx.start.line)
+
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+
+        expr_ctx = ctx.expr()
+
+        if isinstance(self.current_function_return_type, ir.VoidType):
+            if expr_ctx is not None:
+                raise SemanticError("Semantic error: Void function cannot return a value.", ctx.start.line)
+            self.builder.ret_void()
+            return None
+
+        if expr_ctx is None:
+            raise SemanticError("Semantic error: Expected an expression to return.", ctx.start.line)
+
+        val = self.visit(expr_ctx)
+        val = self.cast_to(val, self.current_function_return_type)
+        
+        self.builder.ret(val)
+        return None
+
+    @override
+    def visitCallExpr(self, ctx: vibelangParser.CallExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+
+        func_name = ctx.ID().getText()
+        if func_name not in self.module.globals:
+            raise SemanticError(f"Semantic error: Undefined function '{func_name}'.", ctx.start.line)
+
+        func = self.module.globals[func_name]
+        if not isinstance(func, ir.Function):
+            raise SemanticError(f"Semantic error: '{func_name}' is not a function.", ctx.start.line)
+
+        args_vals = []
+        args_ctx = ctx.arguments()
+        
+        expected_arg_count = len(func.args)
+        
+        if args_ctx is not None:
+            exprs = args_ctx.expr()
+            provided_arg_count = len(exprs)
+            
+            if expected_arg_count != provided_arg_count:
+                raise SemanticError(f"Semantic error: Function '{func_name}' expects {expected_arg_count} arguments, got {provided_arg_count}.", ctx.start.line)
+            
+            for i, expr_ctx in enumerate(exprs):
+                val = self.visit(expr_ctx)
+                expected_type = func.args[i].type
+                val = self.cast_to(val, expected_type)
+                args_vals.append(val)
+        elif expected_arg_count > 0:
+            raise SemanticError(f"Semantic error: Function '{func_name}' expects {expected_arg_count} arguments, got 0.", ctx.start.line)
+
+        is_void = isinstance(func.return_value.type, ir.VoidType)
+        call_name = "" if is_void else f"{func_name}_res"
+        
+        return self.builder.call(func, args_vals, name=call_name)
+
+    @override
+    def visitCallStmt(self, ctx: vibelangParser.CallStmtContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+
+        func_name = ctx.ID().getText()
+        if func_name not in self.module.globals:
+            raise SemanticError(f"Semantic error: Undefined function '{func_name}'.", ctx.start.line)
+
+        func = self.module.globals[func_name]
+        if not isinstance(func, ir.Function):
+            raise SemanticError(f"Semantic error: '{func_name}' is not a function.", ctx.start.line)
+
+        args_vals = []
+        args_ctx = ctx.arguments()
+        
+        expected_arg_count = len(func.args)
+        
+        if args_ctx is not None:
+            exprs = args_ctx.expr()
+            provided_arg_count = len(exprs)
+            
+            if expected_arg_count != provided_arg_count:
+                raise SemanticError(f"Semantic error: Function '{func_name}' expects {expected_arg_count} arguments, got {provided_arg_count}.", ctx.start.line)
+            
+            for i, expr_ctx in enumerate(exprs):
+                val = self.visit(expr_ctx)
+                expected_type = func.args[i].type
+                val = self.cast_to(val, expected_type)
+                args_vals.append(val)
+        elif expected_arg_count > 0:
+            raise SemanticError(f"Semantic error: Function '{func_name}' expects {expected_arg_count} arguments, got 0.", ctx.start.line)
+
+        self.builder.call(func, args_vals)
+        return None

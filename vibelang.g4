@@ -1,14 +1,36 @@
 grammar vibelang;
 
-program: statement* EOF;
+program: (statement | functionDef)* EOF;
+
+functionDef
+    : 'func' ID '(' parameters? ')' '->' returnType statement* 'end' # FunctionDefinition
+    ;
+
+parameters
+    : parameter (',' parameter)*
+    ;
+
+parameter
+    : type ID
+    ;
+
+returnType
+    : type | 'void'
+    ;
 
 statement
-    : type ID '=' expr ';'              # VarDeclAssign
-    | ID '=' expr ';'                   # VarAssign
-    | 'print' '(' expr ')' ';'          # PrintStmt
-    | 'read' '(' ID ')' ';'             # ReadStmt
+    : type ID '=' expr ';'                  # VarDeclAssign
+    | ID '=' expr ';'                       # VarAssign
+    | 'print' '(' expr ')' ';'              # PrintStmt
+    | 'read' '(' ID ')' ';'                 # ReadStmt
     | 'if' expr 'then' statement* ('else' statement*)? 'end' # IfStmt
-    | 'while' expr 'do' statement* 'end'     # WhileStmt
+    | 'while' expr 'do' statement* 'end'    # WhileStmt
+    | 'return' expr? ';'                    # ReturnStmt
+    | ID '(' arguments? ')' ';'             # CallStmt
+    ;
+
+arguments
+    : expr (',' expr)*
     ;
 
 type: 'int32' | 'int64' | 'float32' | 'float64' | 'bool';
@@ -27,6 +49,7 @@ expr
     | FLOAT                     # FloatExpr
     | BOOL                      # BoolExpr
     | '(' expr ')'              # ParenExpr
+    | ID '(' arguments? ')' ';' # CallExpr
     ;
 
 // Lexer rules

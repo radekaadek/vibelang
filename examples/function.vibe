@@ -1,0 +1,28 @@
+func add(int32 a, int32 b) -> int32
+    return a + b;
+end
+
+func factorial(int32 n) -> int32
+    if n <= 1 then
+        return 1;
+    else
+        return n * factorial(n - 1);
+    end
+end
+
+func printSeparator() -> void
+    print(99999); 
+end
+
+int32 x = 5;
+int32 y = 7;
+
+printSeparator();
+
+int32 sum = add(x, y);
+print(sum);
+
+printSeparator();
+
+int32 fact = factorial(x);
+print(fact);
