@@ -1,0 +1,70 @@
+// 1. Zwykła struktura
+struct Point_t
+    float32 x;
+    float32 y;
+end
+
+// 2. Klasa wewnętrzna, posiadająca pole typu struct (Point_t)
+class BoundingBox
+    Point_t center;
+    float32 width;
+    float32 height;
+
+    func getArea() -> float32
+        return self.width * self.height;
+    end
+
+    func scale(float32 factor) -> void
+        self.width = self.width * factor;
+        self.height = self.height * factor;
+    end
+end
+
+// 3. Klasa główna, posiadająca pole będące inną klasą (BoundingBox)
+class Detection
+    BoundingBox bbox;
+    float32 confidence;
+    int32 classId;
+
+    func printInfo() -> void
+        // Wypisujemy podstawowe dane
+        print(self.classId);
+        print(self.confidence);
+        
+        // Wywołanie metody na wewnętrznym obiekcie!
+        float32 area = self.bbox.getArea();
+        print(area);
+    end
+
+    func updateConfidence(float32 newConf) -> void
+        self.confidence = newConf;
+    end
+end
+
+// --- GŁÓWNY PROGRAM ---
+
+// Tworzymy strukturę
+Point_t p = Point_t { x: 120.5, y: 45.0 };
+
+// Tworzymy klasę wewnętrzną, przekazując strukturę
+BoundingBox box = BoundingBox { center: p, width: 50.0, height: 20.0 };
+
+// Tworzymy klasę główną, przekazując klasę BoundingBox
+Detection det = Detection { bbox: box, confidence: 0.88, classId: 1 };
+
+// Testujemy metody
+det.printInfo();
+
+// Łańcuchowanie (chaining) - głęboki dostęp do struktury wewnątrz klasy, która jest w innej klasie
+print(det.bbox.center.x); // Wypisze 120.5
+print(det.bbox.center.y); // Wypisze 45.0
+
+// Modyfikacja przez metodę na głównym obiekcie
+det.updateConfidence(0.99);
+
+// Wywołanie metody na zagnieżdżonym obiekcie
+det.bbox.scale(2.0);
+
+// Sprawdzamy stan po modyfikacjach
+print(det.confidence); // Wypisze 0.99
+print(det.bbox.width); // Wypisze 100.0 (50.0 * 2.0)

@@ -30,6 +30,7 @@ EXPECTED_OUTPUTS = {
     "local_variables.vibe": "32\n5\n64\n64\n12\n24\n12\n24\n7\n",
     "function.vibe": "99999\n12\n99999\n120\n",
     "struct.vibe": "2500.000000\n10.500000\n20.000000\n100.000000\n1\n",
+    "class.vibe": "1\n0.880000\n1000.000000\n120.500000\n45.000000\n0.990000\n100.000000\n",
 }
 
 

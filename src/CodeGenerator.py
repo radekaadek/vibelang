@@ -21,7 +21,9 @@ class CodeGenerator(vibelangVisitor):
     def __init__(self) -> None:
         """Initialize the LLVM module and target machine."""
         super().__init__()
-        self.module = ir.Module(name="vibelangModule")
+
+        llvm_context = ir.Context()
+        self.module = ir.Module(name="vibelangModule", context=llvm_context)
 
         target_triple = binding.get_process_triple()
         self.module.triple = target_triple
@@ -73,6 +75,7 @@ class CodeGenerator(vibelangVisitor):
 
         self.current_function_return_type: ir.Type | None = None
         self.struct_info: dict[str, dict[str, object]] = {}
+        self.class_info: dict[str, dict[str, object]] = {}
 
     @property
     def current_scope(self) -> dict[str, dict[str, object]]:
@@ -183,6 +186,7 @@ class CodeGenerator(vibelangVisitor):
                 return scope[name]
 
         raise SemanticError(f"Semantic error: Undeclared variable '{name}'.", line)
+
     # --- AST NODE VISITING ---
 
     @override
@@ -231,15 +235,12 @@ class CodeGenerator(vibelangVisitor):
             msg = "Semantic error: Cannot allocate memory."
             raise SemanticError(msg, ctx.start.line)
 
-        # Determine target type
-
         target_llvm_type = self.type_map[var_type]
         val = self.cast_to(val, target_llvm_type)  # pyright: ignore[reportArgumentType]
 
         _ = self.builder.store(val, ptr)
         return None
 
-    
     @override
     def visitVarAssign(self, ctx: vibelangParser.VarAssignContext) -> object:
         if ctx.start is None:
@@ -249,25 +250,26 @@ class CodeGenerator(vibelangVisitor):
             raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
             
         lvalue_ctx = ctx.lvalue()
-        ids = lvalue_ctx.ID()
+        # Parse 'self' or ID correctly depending on the first token
+        first_token = lvalue_ctx.getChild(0).getText()
+        var_name = first_token
         
-        var_name = ids[0].getText()
         var_info = self.lookup_variable(var_name, ctx.start.line)
-        
         ptr = cast("ir.Value", var_info["ptr"])
         current_type_str = str(var_info["type"])
         
-        for i in range(1, len(ids)):
-            field_name = ids[i].getText()
-            
+        id_nodes = lvalue_ctx.ID()
+        fields = [n.getText() for n in id_nodes] if first_token == 'self' else [n.getText() for n in id_nodes[1:]]
+        
+        for field_name in fields:
             if current_type_str not in self.struct_info:
-                raise SemanticError(f"Semantic error: Type '{current_type_str}' is not a struct.", ctx.start.line)
+                raise SemanticError(f"Semantic error: Type '{current_type_str}' is not a struct/class.", ctx.start.line)
                 
             struct_def = cast(dict, self.struct_info[current_type_str])
             struct_fields = cast(dict, struct_def["fields"])
             
             if field_name not in struct_fields:
-                raise SemanticError(f"Semantic error: Field '{field_name}' not found in struct '{current_type_str}'.", ctx.start.line)
+                raise SemanticError(f"Semantic error: Field '{field_name}' not found in '{current_type_str}'.", ctx.start.line)
                 
             field_info = struct_fields[field_name]
             field_idx = field_info["index"]
@@ -289,7 +291,6 @@ class CodeGenerator(vibelangVisitor):
         val = self.cast_to(val, target_llvm_type)
         
         self.builder.store(val, ptr)
-        
         return None
 
     @override
@@ -325,7 +326,6 @@ class CodeGenerator(vibelangVisitor):
         elif var_type == "int64":
             fmt_ptr = self.builder.bitcast(self.sfmt_int64, ir.IntType(8).as_pointer())
         elif var_type == "bool":
-            # Temporary i32 allocation, to scanf with '%d'
             tmp_ptr = self.builder.alloca(self.i32, name="bool_tmp_ptr")
             fmt_ptr = self.builder.bitcast(self.sfmt_bool, ir.IntType(8).as_pointer())
             _ = self.builder.call(self.scanf, [fmt_ptr, tmp_ptr])
@@ -367,7 +367,6 @@ class CodeGenerator(vibelangVisitor):
         elif val.type == self.i64:
             fmt_ptr = self.builder.bitcast(self.fmt_int64, ir.IntType(8).as_pointer())
         elif val.type == self.i1:
-            # Convert to int32 for '%d' with printf
             fmt_ptr = self.builder.bitcast(self.fmt_bool, ir.IntType(8).as_pointer())
             val = self.builder.zext(val, self.i32)
         else:  # i32
@@ -519,7 +518,7 @@ class CodeGenerator(vibelangVisitor):
         if ctx.start is None:
             raise SemanticError("Semantic error: Cannot recognize line number.")
         val_str = ctx.BOOL().getText()
-        val = 1 if val_str == "true" else 0 # correct due to grammar
+        val = 1 if val_str == "true" else 0
         return ir.Constant(self.i1, val)
 
     @override
@@ -578,7 +577,7 @@ class CodeGenerator(vibelangVisitor):
         var_name = id_node.getText()
 
         var_info = self.lookup_variable(var_name, ctx.start.line)
-        ptr = cast("ir.Value", var_info["ptr"]) # ptr to look up memory address
+        ptr = cast("ir.Value", var_info["ptr"]) 
 
         if self.builder is None:
             msg = "Semantic error: Cannot allocate memory."
@@ -604,9 +603,6 @@ class CodeGenerator(vibelangVisitor):
         if ctx.start is None:
             msg = "Semantic error: Cannot recognize line number."
             raise SemanticError(msg)
-        if ctx.FLOAT() is None:
-            msg = "Semantic error: Cannot recognize float."
-            raise SemanticError(msg, ctx.start.line)
         if ctx.FLOAT() is None:
             msg = "Semantic error: Cannot recognize float."
             raise SemanticError(msg, ctx.start.line)
@@ -806,10 +802,10 @@ class CodeGenerator(vibelangVisitor):
         elif expected_arg_count > 0:
             raise SemanticError(f"Semantic error: Function '{func_name}' expects {expected_arg_count} arguments, got 0.", ctx.start.line)
 
-        is_void = isinstance(func.return_value.type, ir.VoidType)
+        is_void = isinstance(func.function_type.return_type, ir.VoidType)
         call_name = "" if is_void else f"{func_name}_res"
         
-        return self.builder.call(func, args_vals, name=call_name)
+        return self.builder.call(func, args_vals, name=call_name)    
 
     @override
     def visitCallStmt(self, ctx: vibelangParser.CallStmtContext) -> object:
@@ -888,7 +884,7 @@ class CodeGenerator(vibelangVisitor):
             
         struct_name = ctx.ID().getText()
         if struct_name not in self.struct_info:
-            raise SemanticError(f"Semantic error: Unknown struct '{struct_name}'.", ctx.start.line)
+            raise SemanticError(f"Semantic error: Unknown struct/class '{struct_name}'.", ctx.start.line)
             
         struct_def = cast(dict, self.struct_info[struct_name])
         struct_type = cast("ir.Type", struct_def["type"])
@@ -908,7 +904,7 @@ class CodeGenerator(vibelangVisitor):
                 field_name = id_node.getText()
                 
                 if field_name not in struct_fields:
-                    raise SemanticError(f"Semantic error: Field '{field_name}' not in struct '{struct_name}'.", ctx.start.line)
+                    raise SemanticError(f"Semantic error: Field '{field_name}' not in '{struct_name}'.", ctx.start.line)
                     
                 field_info = struct_fields[field_name]
                 field_idx = field_info["index"]
@@ -917,7 +913,6 @@ class CodeGenerator(vibelangVisitor):
                 val = self.visit(exprs[i])
                 val = self.cast_to(val, self.type_map[field_target_type_str])
                 
-                
                 field_ptr = self.builder.gep(
                     ptr, 
                     [ir.Constant(self.i32, 0), ir.Constant(self.i32, field_idx)], 
@@ -925,7 +920,6 @@ class CodeGenerator(vibelangVisitor):
                 )
                 self.builder.store(val, field_ptr)
                 
-
         return self.builder.load(ptr)
 
     @override
@@ -949,9 +943,237 @@ class CodeGenerator(vibelangVisitor):
         struct_fields = cast(dict, struct_def["fields"])
         
         if field_name not in struct_fields:
-            raise SemanticError(f"Semantic error: Field '{field_name}' does not exist on struct '{struct_name}'.", ctx.start.line)
+            raise SemanticError(f"Semantic error: Field '{field_name}' does not exist on '{struct_name}'.", ctx.start.line)
             
         field_idx = struct_fields[field_name]["index"]
         
         return self.builder.extract_value(struct_val, field_idx, name=f"extract_{field_name}")
 
+
+    @override
+    def visitClassDefinition(self, ctx: vibelangParser.ClassDefinitionContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+            
+        class_name = ctx.ID().getText()
+        if class_name in self.type_map:
+            raise SemanticError(f"Semantic error: Type '{class_name}' is already defined.", ctx.start.line)
+            
+        llvm_class = self.module.context.get_identified_type(class_name)
+        
+        fields_metadata = {}
+        field_llvm_types = []
+        methods_ctx = []
+        
+        # Parse fields and accumulate methods
+        for member_ctx in ctx.classMember():
+            if isinstance(member_ctx, vibelangParser.ClassFieldContext):  # To jest pole (Field)
+                field_type_str = member_ctx.type_().getText()
+                field_name = member_ctx.ID().getText()
+                
+                if field_type_str not in self.type_map:
+                    raise SemanticError(f"Semantic error: Unknown field type '{field_type_str}'.", ctx.start.line)
+                    
+                fields_metadata[field_name] = {"index": len(field_llvm_types), "type": field_type_str}
+                field_llvm_types.append(self.type_map[field_type_str])
+                
+            elif isinstance(member_ctx, vibelangParser.ClassMethodContext):  # To jest metoda (Method)
+                methods_ctx.append(member_ctx)
+                
+        llvm_class.set_body(*field_llvm_types)
+        
+        self.type_map[class_name] = llvm_class
+
+        self.struct_info[class_name] = {"type": llvm_class, "fields": fields_metadata}
+        self.class_info[class_name] = {"type": llvm_class, "fields": fields_metadata}
+        
+        for m_ctx in methods_ctx:
+            method_name = m_ctx.ID().getText()
+            full_method_name = f"{class_name}_{method_name}"
+            
+            ret_type_str = m_ctx.returnType().getText()
+            if ret_type_str == 'void':
+                ret_llvm_type = ir.VoidType()
+            else:
+                ret_llvm_type = self.type_map[ret_type_str]
+                
+            param_llvm_types = [llvm_class.as_pointer()]
+            param_names = ["self"]
+            param_type_strs = [class_name]
+            
+            params_ctx = m_ctx.parameters()
+            if params_ctx is not None:
+                for p_ctx in params_ctx.parameter():
+                    p_type_str = p_ctx.type_().getText()
+                    p_name = p_ctx.ID().getText()
+                    param_llvm_types.append(self.type_map[p_type_str])
+                    param_names.append(p_name)
+                    param_type_strs.append(p_type_str)
+                    
+            func_type = ir.FunctionType(ret_llvm_type, param_llvm_types)
+            func = ir.Function(self.module, func_type, name=full_method_name)
+            
+            for arg, name in zip(func.args, param_names):
+                arg.name = name
+                
+            saved_builder = self.builder
+            block = func.append_basic_block(name="entry")
+            self.builder = ir.IRBuilder(block)
+            
+            self.enter_scope()
+            self.current_function_return_type = ret_llvm_type
+            
+            for i, (arg, name, type_str) in enumerate(zip(func.args, param_names, param_type_strs)):
+                if i == 0:
+                    self.current_scope["self"] = {"ptr": arg, "type": class_name}
+                else:
+                    ptr = self.allocate_variable(name, type_str, m_ctx.start.line)
+                    self.builder.store(arg, ptr)
+                    
+            for stmt in m_ctx.statement():
+                self.visit(stmt)
+                
+            if not self.builder.block.is_terminated:
+                if isinstance(ret_llvm_type, ir.VoidType):
+                    self.builder.ret_void()
+                elif isinstance(ret_llvm_type, (ir.FloatType, ir.DoubleType)):
+                    self.builder.ret(ir.Constant(ret_llvm_type, 0.0))
+                else:
+                    self.builder.ret(ir.Constant(ret_llvm_type, 0))
+                    
+            self.current_function_return_type = None
+            self.exit_scope()
+            self.builder = saved_builder
+            
+        return None
+
+    @override
+    def visitNewObjectExpr(self, ctx: vibelangParser.NewObjectExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        
+        class_name = ctx.ID().getText()
+        if class_name not in self.class_info:
+            raise SemanticError(f"Semantic error: Unknown class '{class_name}'.", ctx.start.line)
+            
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+            
+        llvm_type = self.type_map[class_name]
+
+        ptr = self.builder.alloca(llvm_type, name=f"new_{class_name}")
+        return self.builder.load(ptr)
+
+    @override
+    def visitSelfExpr(self, ctx: vibelangParser.SelfExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        
+        var_info = self.lookup_variable("self", ctx.start.line)
+        ptr = cast("ir.Value", var_info["ptr"])
+        typ = self.type_map[var_info["type"]]
+        
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+            
+        return self.builder.load(ptr, typ=typ, name="self_val")
+
+    def get_pointer_and_class(self, ctx) -> tuple[ir.Value, str]:
+        if isinstance(ctx, vibelangParser.IdExprContext):
+            var_name = ctx.ID().getText()
+            var_info = self.lookup_variable(var_name, ctx.start.line)
+            return cast("ir.Value", var_info["ptr"]), str(var_info["type"])
+            
+        elif isinstance(ctx, vibelangParser.SelfExprContext):
+            var_info = self.lookup_variable("self", ctx.start.line)
+            return cast("ir.Value", var_info["ptr"]), str(var_info["type"])
+            
+        elif isinstance(ctx, vibelangParser.MemberAccessExprContext):
+            base_ptr, base_class_name = self.get_pointer_and_class(ctx.expr())
+            field_name = ctx.ID().getText()
+            
+            struct_def = cast(dict, self.struct_info[base_class_name])
+            struct_fields = cast(dict, struct_def["fields"])
+            
+            if field_name not in struct_fields:
+                raise SemanticError(f"Semantic error: Field '{field_name}' not found.", ctx.start.line)
+                
+            field_info = struct_fields[field_name]
+            field_idx = field_info["index"]
+            field_type_str = field_info["type"]
+            
+            new_ptr = self.builder.gep(
+                base_ptr, 
+                [ir.Constant(self.i32, 0), ir.Constant(self.i32, field_idx)],
+                inbounds=True
+            )
+            return new_ptr, field_type_str
+            
+        else:
+            raise ValueError("Not an L-value")
+
+    def handle_method_call(self, ctx: vibelangParser.MethodCallExprContext | vibelangParser.MethodCallStmtContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+
+        expr_ctx = ctx.expr()
+        method_name = ctx.ID().getText()
+
+        try:
+            obj_ptr, class_name = self.get_pointer_and_class(expr_ctx)
+        except ValueError:
+            obj_val = cast("ir.Value", self.visit(expr_ctx))
+            class_name = None
+            for name, llvm_typ in self.type_map.items():
+                if llvm_typ == obj_val.type:
+                    class_name = name
+                    break
+            if class_name is None or class_name not in self.class_info:
+                raise SemanticError("Semantic error: Cannot call method on non-object.", ctx.start.line)
+            
+            obj_ptr = self.builder.alloca(obj_val.type, name="temp_obj_ptr")
+            self.builder.store(obj_val, obj_ptr)
+
+        if class_name not in self.class_info:
+            raise SemanticError(f"Semantic error: Type '{class_name}' is not a class.", ctx.start.line)
+
+        full_func_name = f"{class_name}_{method_name}"
+        if full_func_name not in self.module.globals:
+            raise SemanticError(f"Semantic error: Method '{method_name}' not found in class '{class_name}'.", ctx.start.line)
+
+        func = self.module.globals[full_func_name]
+        
+        args_vals = [obj_ptr] 
+        args_ctx = ctx.arguments()
+        
+        expected_arg_count = len(func.args) - 1 
+        
+        if args_ctx is not None:
+            exprs = args_ctx.expr()
+            provided_arg_count = len(exprs)
+            
+            if expected_arg_count != provided_arg_count:
+                raise SemanticError(f"Semantic error: Method '{method_name}' expects {expected_arg_count} arguments, got {provided_arg_count}.", ctx.start.line)
+            
+            for i, arg_expr in enumerate(exprs):
+                val = cast("ir.Value", self.visit(arg_expr))
+                expected_type = func.args[i+1].type 
+                val = self.cast_to(val, expected_type)
+                args_vals.append(val)
+        elif expected_arg_count > 0:
+            raise SemanticError(f"Semantic error: Method '{method_name}' expects {expected_arg_count} arguments, got 0.", ctx.start.line)
+
+        is_void = isinstance(func.function_type.return_type, ir.VoidType)
+        call_name = "" if is_void else f"{method_name}_res"
+        
+        return self.builder.call(func, args_vals, name=call_name)        
+        return self.builder.call(func, args_vals, name=call_name)    @override
+    def visitMethodCallExpr(self, ctx: vibelangParser.MethodCallExprContext) -> object:
+        return self.handle_method_call(ctx)
+
+    @override
+    def visitMethodCallStmt(self, ctx: vibelangParser.MethodCallStmtContext) -> object:
+        self.handle_method_call(ctx)
+        return None
