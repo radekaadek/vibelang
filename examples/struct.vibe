@@ -1,0 +1,50 @@
+struct Point
+    float32 x;
+    float32 y;
+end
+
+struct Box
+    Point center;
+    float32 width;
+end
+
+// Funkcja obliczająca pole (zakładamy kwadrat)
+func calculateArea(Box box) -> float32
+    return box.width * box.width;
+end
+
+// Opcjonalna funkcja pokazująca odwoływanie się do zagnieżdżonych pól
+func isAtOrigin(Box box) -> bool
+    if box.center.x == 0.0 then
+        if box.center.y == 0.0 then
+            return true;
+        else
+            return false;
+        end
+    else
+        return false;
+    end
+end
+
+// 1. Inicjalizacja zagnieżdżonej struktury (oddzielnie)
+Point centerPoint = Point { x: 10.5, y: 20.0 };
+Box myBox = Box { center: centerPoint, width: 50.0 };
+
+// 2. Inicjalizacja zagnieżdżonej struktury (inline / bezpośrednio)
+Box originBox = Box { center: Point { x: 0.0, y: 0.0 }, width: 15.0 };
+
+// Wywołanie funkcji
+float32 area1 = calculateArea(myBox);
+print(area1); // Wypisze 2500.0
+
+// Odczytywanie wartości z zagnieżdżonej struktury
+print(myBox.center.x); // Wypisze 10.5
+print(myBox.center.y); // Wypisze 20.0
+
+// Modyfikacja wartości w zagnieżdżonej strukturze
+myBox.center.x = 100.0;
+print(myBox.center.x); // Wypisze 100.0
+
+// Sprawdzenie logiczne
+bool originCheck = isAtOrigin(originBox);
+print(originCheck); // Wypisze true

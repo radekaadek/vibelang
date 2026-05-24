@@ -21,14 +21,15 @@ EXPECTED_OUTPUTS = {
     "float.vibe": "78.537500\n",
     # Zaokrąglenia mogą się delikatnie różnić dla printf_formatting, ale poniższe wartości są typowe dla float64 w LLVM
     "printf_formatting.vibe": "42\n22\n3.140000\n2.718282\n",
-    "logic.vibe": "0\n1\n0\n1\n0\n1\n0\n1\n0\n0\n",  # <-- ADDED TEST CASE
+    "logic.vibe": "0\n1\n0\n1\n0\n1\n0\n1\n0\n0\n",
     "if.vibe": "1\n1\n",
     "if_else.vibe": "1\n1\n0\n0\n",
     "relations.vibe": "1\n0\n1\n0\n1\n0\n1\n1\n0\n1\n0\n1\n1\n0\n1\n0\n1\n100\n200\n10\n5\n",
     "relations_type.vibe": "1\n1\n0\n1\n1\n1\n0\n1\n0\n1\n0\n1\n1\n",
     "relations_mixed.vibe": "1\n1\n0\n1\n0\n1\n0\n1\n1\n0\n999\n",
     "local_variables.vibe": "32\n5\n64\n64\n12\n24\n12\n24\n7\n",
-    "function.vibe": "99999\n12\n99999\n120\n"
+    "function.vibe": "99999\n12\n99999\n120\n",
+    "struct.vibe": "2500.000000\n10.500000\n20.000000\n100.000000\n1\n",
 }
 
 
@@ -49,9 +50,9 @@ def test_valid_examples(
     run_process = subprocess.run(
         ["lli", str(output_ll)], capture_output=True, text=True
     )
-    assert run_process.returncode == 0, (
-        f"Błąd wykonania dla {example_file}:\n{run_process.stderr}"
-    )
+    assert (
+        run_process.returncode == 0
+    ), f"Błąd wykonania dla {example_file}:\n{run_process.stderr}"
 
     # 3. Weryfikacja zgodności wyjścia (zmienne, operacje, rzutowania) z oczekiwanym wynikiem
     assert run_process.stdout == expected_output
@@ -72,7 +73,9 @@ def test_semantic_error_redeclaration(tmp_path):
 
     # Zaktualizowana oczekiwana wiadomość błędu
     # expected_error_msg = "Semantic error: Variable 'licznik' already exists."
-    expected_error_msg = "Semantic error: Variable 'licznik' already exists in this scope."
+    expected_error_msg = (
+        "Semantic error: Variable 'licznik' already exists in this scope."
+    )
 
     assert expected_error_msg in str(exc_info.value.__cause__)
 
@@ -100,9 +103,9 @@ def test_read_statement(tmp_path: Path) -> None:
         text=True,
     )
 
-    assert run_process.returncode == 0, (
-        f"Błąd wykonania instrukcji read():\n{run_process.stderr}"
-    )
+    assert (
+        run_process.returncode == 0
+    ), f"Błąd wykonania instrukcji read():\n{run_process.stderr}"
 
     # 4. Weryfikacja zgodności wyjścia (floaty domyślnie wyświetlają 6 miejsc po przecinku)
     expected_output = "42\n8589934592\n3.140000\n2.718282\n"

@@ -72,6 +72,7 @@ class CodeGenerator(vibelangVisitor):
         self.sfmt_float64 = self.create_scanf_fmt_string("sfmt_float64", "%lf")
 
         self.current_function_return_type: ir.Type | None = None
+        self.struct_info: dict[str, dict[str, object]] = {}
 
     @property
     def current_scope(self) -> dict[str, dict[str, object]]:
@@ -238,35 +239,57 @@ class CodeGenerator(vibelangVisitor):
         _ = self.builder.store(val, ptr)
         return None
 
+    
     @override
     def visitVarAssign(self, ctx: vibelangParser.VarAssignContext) -> object:
-        id_node = ctx.ID()
         if ctx.start is None:
-            msg = "Semantic error: Cannot recognize line number."
-            raise SemanticError(msg)
-        if id_node is None:
-            msg = "Semantic error: Cannot recognize variable name."
-            raise SemanticError(msg, ctx.start.line)
-        var_name = id_node.getText()
-
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+            
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+            
+        lvalue_ctx = ctx.lvalue()
+        ids = lvalue_ctx.ID()
+        
+        var_name = ids[0].getText()
         var_info = self.lookup_variable(var_name, ctx.start.line)
+        
         ptr = cast("ir.Value", var_info["ptr"])
-
+        current_type_str = str(var_info["type"])
+        
+        for i in range(1, len(ids)):
+            field_name = ids[i].getText()
+            
+            if current_type_str not in self.struct_info:
+                raise SemanticError(f"Semantic error: Type '{current_type_str}' is not a struct.", ctx.start.line)
+                
+            struct_def = cast(dict, self.struct_info[current_type_str])
+            struct_fields = cast(dict, struct_def["fields"])
+            
+            if field_name not in struct_fields:
+                raise SemanticError(f"Semantic error: Field '{field_name}' not found in struct '{current_type_str}'.", ctx.start.line)
+                
+            field_info = struct_fields[field_name]
+            field_idx = field_info["index"]
+            current_type_str = field_info["type"]
+            
+            ptr = self.builder.gep(
+                ptr, 
+                [ir.Constant(self.i32, 0), ir.Constant(self.i32, field_idx)],
+                inbounds=True
+            )
+            
         expr_ctx = ctx.expr()
         if expr_ctx is None:
-            msg = "Semantic error: Cannot recognize expression."
-            raise SemanticError(msg, ctx.start.line)
+            raise SemanticError("Semantic error: Cannot recognize expression.", ctx.start.line)
+            
         val = self.visit(expr_ctx)
-
-        if self.builder is None:
-            msg = "Semantic error: Cannot allocate memory."
-            raise SemanticError(msg, ctx.start.line)
-
-        target_llvm_type = self.type_map[str(var_info["type"])]
-        val = self.cast_to(val, target_llvm_type)  # pyright: ignore[reportArgumentType]
-
-        _ = self.builder.store(val, ptr)
-
+        
+        target_llvm_type = self.type_map[current_type_str]
+        val = self.cast_to(val, target_llvm_type)
+        
+        self.builder.store(val, ptr)
+        
         return None
 
     @override
@@ -825,3 +848,110 @@ class CodeGenerator(vibelangVisitor):
 
         self.builder.call(func, args_vals)
         return None
+
+    @override
+    def visitStructDefinition(self, ctx: vibelangParser.StructDefinitionContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+            
+        struct_name = ctx.ID().getText()
+        
+        if struct_name in self.type_map:
+            raise SemanticError(f"Semantic error: Type '{struct_name}' is already defined.", ctx.start.line)
+            
+        llvm_struct = self.module.context.get_identified_type(struct_name)
+        
+        fields_metadata = {}
+        field_llvm_types = []
+        
+        for i, field_ctx in enumerate(ctx.structField()):
+            field_type_str = field_ctx.type_().getText()
+            field_name = field_ctx.ID().getText()
+            
+            if field_type_str not in self.type_map:
+                raise SemanticError(f"Semantic error: Unknown field type '{field_type_str}'.", ctx.start.line)
+                
+            fields_metadata[field_name] = {"index": i, "type": field_type_str}
+            field_llvm_types.append(self.type_map[field_type_str])
+            
+        llvm_struct.set_body(*field_llvm_types)
+        
+        self.type_map[struct_name] = llvm_struct
+        self.struct_info[struct_name] = {"type": llvm_struct, "fields": fields_metadata}
+        
+        return None
+
+    @override
+    def visitStructInitExpr(self, ctx: vibelangParser.StructInitExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+            
+        struct_name = ctx.ID().getText()
+        if struct_name not in self.struct_info:
+            raise SemanticError(f"Semantic error: Unknown struct '{struct_name}'.", ctx.start.line)
+            
+        struct_def = cast(dict, self.struct_info[struct_name])
+        struct_type = cast("ir.Type", struct_def["type"])
+        struct_fields = cast(dict, struct_def["fields"])
+        
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+            
+        ptr = self.builder.alloca(struct_type, name=f"{struct_name}_init")
+        
+        field_init_list = ctx.fieldInitList()
+        if field_init_list is not None:
+            ids = field_init_list.ID()
+            exprs = field_init_list.expr()
+            
+            for i, id_node in enumerate(ids):
+                field_name = id_node.getText()
+                
+                if field_name not in struct_fields:
+                    raise SemanticError(f"Semantic error: Field '{field_name}' not in struct '{struct_name}'.", ctx.start.line)
+                    
+                field_info = struct_fields[field_name]
+                field_idx = field_info["index"]
+                field_target_type_str = field_info["type"]
+                
+                val = self.visit(exprs[i])
+                val = self.cast_to(val, self.type_map[field_target_type_str])
+                
+                
+                field_ptr = self.builder.gep(
+                    ptr, 
+                    [ir.Constant(self.i32, 0), ir.Constant(self.i32, field_idx)], 
+                    inbounds=True
+                )
+                self.builder.store(val, field_ptr)
+                
+
+        return self.builder.load(ptr)
+
+    @override
+    def visitMemberAccessExpr(self, ctx: vibelangParser.MemberAccessExprContext) -> object:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
+            
+        if self.builder is None:
+            raise SemanticError("Semantic error: Builder is not initialized.", ctx.start.line)
+            
+        struct_val = cast("ir.Value", self.visit(ctx.expr()))
+        field_name = ctx.ID().getText()
+        
+        struct_type = struct_val.type
+
+        if not isinstance(struct_type, ir.IdentifiedStructType):
+            raise SemanticError("Semantic error: Attempted member access on a non-struct type.", ctx.start.line)
+            
+        struct_name = struct_type.name
+        struct_def = cast(dict, self.struct_info[struct_name])
+        struct_fields = cast(dict, struct_def["fields"])
+        
+        if field_name not in struct_fields:
+            raise SemanticError(f"Semantic error: Field '{field_name}' does not exist on struct '{struct_name}'.", ctx.start.line)
+            
+        field_idx = struct_fields[field_name]["index"]
+        
+        return self.builder.extract_value(struct_val, field_idx, name=f"extract_{field_name}")
+
