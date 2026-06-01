@@ -1,0 +1,129 @@
+/* ---------- Funkcje rekurencyjne ---------- */
+
+// Silnia - wynik moze byc duzy, wiec zwracamy int64.
+func factorial(int32 n) -> int64
+    if n <= 1 then
+        return 1;
+    end
+    return n * factorial(n - 1);
+end
+
+// Ciag Fibonacciego (rekurencja podwojna).
+func fib(int32 n) -> int32
+    if n < 2 then
+        return n;
+    end
+    return fib(n - 1) + fib(n - 2);
+end
+
+func gcd(int32 a, int32 b) -> int32
+    if b == 0 then
+        return a;
+    end
+    int32 q = a / b;
+    int32 r = a - q * b;
+    return gcd(b, r);
+end
+
+/* ---------- Pętla ---------- */
+// Test pierwszosci metoda prob dzielenia.
+func is_prime(int32 n) -> bool
+    if n < 2 then
+        return false;
+    end
+    int32 i = 2;
+    while i * i <= n do
+        int32 q = n / i;
+        int32 r = n - q * i;
+        if r == 0 then
+            return false;
+        end
+        i = i + 1;
+    end
+    return true;
+end
+
+/* ---------- Struktura + funkcja na niej operujaca ---------- */
+
+struct Point
+    int32 x;
+    int32 y;
+end
+
+// Kwadrat odleglosci miedzy dwoma punktami (bez pierwiastka).
+func dist_sq(Point a, Point b) -> int32
+    int32 dx = a.x - b.x;
+    int32 dy = a.y - b.y;
+    return dx * dx + dy * dy;
+end
+
+/* ---------- Klasa z polami i metodami (OOP) ---------- */
+
+class BankAccount
+    float64 balance;
+
+    func init(float64 start) -> void
+        self.balance = start;
+    end
+
+    func deposit(float64 amount) -> void
+        self.balance = self.balance + amount;
+    end
+
+    // Zwraca true gdy wyplata sie powiodla, false gdy brak srodkow.
+    func withdraw(float64 amount) -> bool
+        if amount > self.balance then
+            return false;
+        end
+        self.balance = self.balance - amount;
+        return true;
+    end
+
+    func get_balance() -> float64
+        return self.balance;
+    end
+end
+
+// ============================================================
+//  Program glowny
+// ============================================================
+
+// 1. Rekurencja
+print(factorial(10));      // 3628800
+print(fib(15));            // 610
+print(gcd(48, 36));        // 12
+
+// 2. Logika boolowska + promocja typow
+int32 a = 7;
+bool in_range = a > 0 and a < 10;
+print(in_range);           // 1
+
+// 3. Struktury
+Point origin = Point { x: 0, y: 0 };
+Point target = Point { x: 3, y: 4 };
+print(dist_sq(origin, target));   // 25
+
+// 4. Klasa / OOP
+BankAccount acc = new BankAccount();
+acc.init(100.0);
+acc.deposit(50.0);
+print(acc.get_balance());         // 150.000000
+
+bool ok = acc.withdraw(30.0);
+print(ok);                        // 1
+print(acc.get_balance());         // 120.000000
+
+bool denied = acc.withdraw(500.0);
+print(denied);                    // 0  (brak srodkow, saldo bez zmian)
+
+// 5. Petla + warunek + wywolanie funkcji: liczby pierwsze < 30
+int32 count = 0;
+int32 k = 2;
+while k < 30 do
+    if is_prime(k) then
+        count = count + 1;
+        print(k);
+    end
+    k = k + 1;
+end
+print(count);              // 10
