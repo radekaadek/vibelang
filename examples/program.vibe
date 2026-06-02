@@ -1,6 +1,6 @@
 /* ---------- Funkcje rekurencyjne ---------- */
 
-// Silnia - wynik moze byc duzy, wiec zwracamy int64.
+// Silnia 
 func factorial(int32 n) -> int64
     if n <= 1 then
         return 1;
@@ -8,7 +8,7 @@ func factorial(int32 n) -> int64
     return n * factorial(n - 1);
 end
 
-// Ciag Fibonacciego (rekurencja podwojna).
+// Ciag Fibonacciego (rekurencja podwojna)
 func fib(int32 n) -> int32
     if n < 2 then
         return n;
@@ -26,7 +26,7 @@ func gcd(int32 a, int32 b) -> int32
 end
 
 /* ---------- Pętla ---------- */
-// Test pierwszosci metoda prob dzielenia.
+// Test pierwszosci metoda prob dzielenia
 func is_prime(int32 n) -> bool
     if n < 2 then
         return false;
@@ -44,21 +44,19 @@ func is_prime(int32 n) -> bool
 end
 
 /* ---------- Struktura + funkcja na niej operujaca ---------- */
-
 struct Point
     int32 x;
     int32 y;
 end
 
-// Kwadrat odleglosci miedzy dwoma punktami (bez pierwiastka).
+// Kwadrat odleglosci miedzy dwoma punktami 
 func dist_sq(Point a, Point b) -> int32
     int32 dx = a.x - b.x;
     int32 dy = a.y - b.y;
     return dx * dx + dy * dy;
 end
 
-/* ---------- Klasa z polami i metodami (OOP) ---------- */
-
+/* ---------- Klasa z polami i metodami ---------- */
 class BankAccount
     float64 balance;
 

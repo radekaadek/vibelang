@@ -1,0 +1,12 @@
+func fooI() -> int32
+end
+
+func fooF() -> float32
+end
+
+func bar() -> void
+return;
+end
+
+print(fooI());
+print(fooF());
