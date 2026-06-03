@@ -76,10 +76,8 @@ class CodeGenerator(vibelangVisitor):
         # The return type of the function currently being emitted
         self.current_function_return_type: ir.Type | None = None
 
-        #   {
-        #     "type":   <LLVM identified struct type>,
+        #     "type":   <LLVM identified struct type>,  # noqa: ERA001
         #     "fields": { field_name: {"index": <int>, "type": <type name str>} }
-        #   }
         # The per-field "index" is the field's position in the struct, reused for
         # field address and field read.
         self.struct_info: dict[str, dict[str, object]] = {}
@@ -274,10 +272,10 @@ class CodeGenerator(vibelangVisitor):
 
         id_nodes = lvalue_ctx.ID()  # pyright: ignore[reportOptionalMemberAccess]
         fields = (
-            [n.getText() for n in id_nodes]
-            if first_token == "self"
-            else [n.getText() for n in id_nodes[1:]]
-        )  # pyright: ignore[reportOptionalIterable, reportGeneralTypeIssues, reportIndexIssue, reportOptionalSubscript]
+            [n.getText() for n in id_nodes]  # pyright: ignore[reportOptionalIterable, reportGeneralTypeIssues]
+            if first_token == "self"  # noqa: S105
+            else [n.getText() for n in id_nodes[1:]]  # pyright: ignore[reportIndexIssue, reportOptionalSubscript]
+        )
 
         for field_name in fields:
             if current_type_str not in self.struct_info:
@@ -402,7 +400,7 @@ class CodeGenerator(vibelangVisitor):
         return None
 
     @override
-    def visitIfStmt(self, ctx: vibelangParser.IfStmtContext):
+    def visitIfStmt(self, ctx: vibelangParser.IfStmtContext) -> None:  # noqa: PLR0912
         """Generate an if / if-else statement using LLVM basic blocks."""
         if ctx.start is None:
             raise SemanticError("Semantic error: Cannot recognize line number.")
@@ -447,7 +445,7 @@ class CodeGenerator(vibelangVisitor):
         else_block = self.builder.append_basic_block("if.else") if has_else else None
         merge_block = self.builder.append_basic_block("if.end")
 
-        # Conditional jump: true -> then, false -> else (or straight to merge if no else).
+        # Conditional jump: true -> then, false -> else (or merge if no else).
         if has_else:
             _ = self.builder.cbranch(cond_val, then_block, else_block)
         else:
@@ -481,11 +479,13 @@ class CodeGenerator(vibelangVisitor):
         self.builder.position_at_end(merge_block)
 
     @override
-    def visitRelExpr(self, ctx: vibelangParser.RelExprContext):
+    def visitRelExpr(self, ctx: vibelangParser.RelExprContext) -> ir.ICMPInstr | ir.FCMPInstr:
+        if ctx.start is None:
+            raise SemanticError("Semantic error: Cannot recognize line number.")
         if self.builder is None:
             raise SemanticError(
                 "Semantic error: Cannot allocate memory.", ctx.start.line
-            )  # pyright: ignore[reportOptionalMemberAccess]
+            )
 
         left_val = self.visit(ctx.expr(0))  # pyright: ignore[reportArgumentType]
         right_val = self.visit(ctx.expr(1))  # pyright: ignore[reportArgumentType]
@@ -494,7 +494,7 @@ class CodeGenerator(vibelangVisitor):
             raise SemanticError(
                 "Semantic error: Invalid operand in relational expression.",
                 ctx.start.line,
-            )  # pyright: ignore[reportOptionalMemberAccess]
+            )
 
         left_val, right_val = self.promote_types(left_val, right_val)
 
@@ -514,10 +514,10 @@ class CodeGenerator(vibelangVisitor):
             raise SemanticError(
                 f"Semantic error: Unsupported relational operator '{operator}'.",
                 ctx.start.line,
-            )  # pyright: ignore[reportOptionalMemberAccess]
+            ) from None
 
     @override
-    def visitWhileStmt(self, ctx: vibelangParser.WhileStmtContext):
+    def visitWhileStmt(self, ctx: vibelangParser.WhileStmtContext) -> None:
         """Generate a while loop using LLVM basic blocks."""
         if ctx.start is None:
             raise SemanticError("Semantic error: Cannot recognize line number.")
@@ -730,7 +730,7 @@ class CodeGenerator(vibelangVisitor):
         return self.builder.sdiv(left, right, name="divtmp")
 
     @override
-    def visitFunctionDefinition(
+    def visitFunctionDefinition(  # noqa: PLR0912
         self, ctx: vibelangParser.FunctionDefinitionContext
     ) -> object:
         """Define a top-level function and emit its body."""
@@ -919,8 +919,9 @@ class CodeGenerator(vibelangVisitor):
                 val = self.visit(expr_ctx)
                 expected_type = func.args[i].type
                 val = self.cast_to(
-                    val, expected_type
-                )  # implicit cast to the parameter type  # pyright: ignore[reportArgumentType]
+                    val,  # pyright: ignore[reportArgumentType]
+                    expected_type,
+                )
                 args_vals.append(val)
         elif expected_arg_count > 0:
             raise SemanticError(
@@ -1132,7 +1133,7 @@ class CodeGenerator(vibelangVisitor):
         )
 
     @override
-    def visitClassDefinition(
+    def visitClassDefinition(  # noqa: PLR0912, PLR0915
         self, ctx: vibelangParser.ClassDefinitionContext
     ) -> object:
         """Define a class: its data layout plus its methods."""
@@ -1300,7 +1301,7 @@ class CodeGenerator(vibelangVisitor):
 
         return self.builder.load(ptr, typ=typ, name="self_val")
 
-    def get_pointer_and_class(self, ctx) -> tuple[ir.Value, str]:  # pyright: ignore[reportUnknownParameterType, reportMissingParameterType]
+    def get_pointer_and_class(self, ctx: vibelangParser.IdExprContext | vibelangParser.SelfExprContext | vibelangParser.MemberAccessExprContext) -> tuple[ir.Value, str]:
         """Resolve an expression to an *address* (pointer) and its class/struct name."""
         if isinstance(ctx, vibelangParser.IdExprContext):
             var_name = ctx.ID().getText()  # pyright: ignore[reportOptionalMemberAccess]
@@ -1311,40 +1312,47 @@ class CodeGenerator(vibelangVisitor):
             var_info = self.lookup_variable("self", ctx.start.line)  # pyright: ignore[reportOptionalMemberAccess]
             return cast("ir.Value", var_info["ptr"]), str(var_info["type"])
 
-        if isinstance(ctx, vibelangParser.MemberAccessExprContext):
-            # Recurse to the base's pointer, then index into the requested field.
-            base_ptr, base_class_name = self.get_pointer_and_class(ctx.expr())
-            field_name = ctx.ID().getText()  # pyright: ignore[reportOptionalMemberAccess]
+        # Recurse to the base's pointer, then index into the requested field.
+        base_expr = ctx.expr()
+        if not isinstance(
+            base_expr,
+            (
+                vibelangParser.IdExprContext,
+                vibelangParser.SelfExprContext,
+                vibelangParser.MemberAccessExprContext,
+            ),
+        ):
+            msg = "Semantic error: Invalid base expression in member access."
+            raise SemanticError(msg, ctx.start.line)  # pyright: ignore[reportOptionalMemberAccess]
+        base_ptr, base_class_name = self.get_pointer_and_class(base_expr)
+        field_name = ctx.ID().getText()  # pyright: ignore[reportOptionalMemberAccess]
 
-            struct_def = cast("dict", self.struct_info[base_class_name])  # pyright: ignore[reportMissingTypeArgument]
-            struct_fields = cast("dict", struct_def["fields"])  # pyright: ignore[reportMissingTypeArgument]
+        struct_def = cast("dict", self.struct_info[base_class_name])  # pyright: ignore[reportMissingTypeArgument]
+        struct_fields = cast("dict", struct_def["fields"])  # pyright: ignore[reportMissingTypeArgument]
 
-            if field_name not in struct_fields:
-                raise SemanticError(
-                    f"Semantic error: Field '{field_name}' not found.", ctx.start.line
-                )  # pyright: ignore[reportOptionalMemberAccess]
-
-            field_info = struct_fields[field_name]
-            field_idx = field_info["index"]
-            field_type_str = field_info["type"]
-
-            # Address of base[field_idx]; the returned pointer can be stored into.
-            new_ptr = self.builder.gep(  # pyright: ignore[reportOptionalMemberAccess]
-                base_ptr,
-                [ir.Constant(self.i32, 0), ir.Constant(self.i32, field_idx)],
-                inbounds=True,
+        if field_name not in struct_fields:
+            raise SemanticError(
+                f"Semantic error: Field '{field_name}' not found.", ctx.start.line  # pyright: ignore[reportOptionalMemberAccess]
             )
-            return new_ptr, field_type_str
 
-        # Not an addressable expression (e.g. a literal or a call result).
-        raise ValueError("Not an L-value")
+        field_info = struct_fields[field_name]
+        field_idx = field_info["index"]
+        field_type_str = field_info["type"]
 
-    def handle_method_call(
+        # Address of base[field_idx]; the returned pointer can be stored into.
+        new_ptr = self.builder.gep(  # pyright: ignore[reportOptionalMemberAccess]
+            base_ptr,
+            [ir.Constant(self.i32, 0), ir.Constant(self.i32, field_idx)],
+            inbounds=True,
+        )
+        return new_ptr, field_type_str
+
+    def handle_method_call(  # noqa: PLR0912
         self,
         ctx: vibelangParser.MethodCallExprContext
         | vibelangParser.MethodCallStmtContext,
     ) -> object:
-        """Shared logic for method calls, used by both the expression and statement forms."""
+        """Shared logic for method calls (expression and statement forms)."""
         if ctx.start is None:
             raise SemanticError("Semantic error: Cannot recognize line number.")
         if self.builder is None:
@@ -1358,6 +1366,15 @@ class CodeGenerator(vibelangVisitor):
         # Preferred path: the receiver is addressable (a variable, self, or a
         # field), so we call the method on the real object's pointer.
         try:
+            if not isinstance(
+                expr_ctx,
+                (
+                    vibelangParser.IdExprContext,
+                    vibelangParser.SelfExprContext,
+                    vibelangParser.MemberAccessExprContext,
+                ),
+            ):
+                raise TypeError("Not an addressable expression")
             obj_ptr, class_name = self.get_pointer_and_class(expr_ctx)
         except ValueError:
             # Fallback: the receiver is a temporary value (e.g. a call result).
@@ -1372,7 +1389,7 @@ class CodeGenerator(vibelangVisitor):
             if class_name is None or class_name not in self.class_info:
                 raise SemanticError(
                     "Semantic error: Cannot call method on non-object.", ctx.start.line
-                )
+                ) from None
 
             obj_ptr = self.builder.alloca(obj_val.type, name="temp_obj_ptr")
             _ = self.builder.store(obj_val, obj_ptr)
