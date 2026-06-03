@@ -1,0 +1,6 @@
+int32 k = 0;
+while k < 1 do
+    int32 inner = 42;
+    k = k + 1;
+end
+print(inner);

@@ -1,0 +1,20 @@
+int32 x = 10;
+if true then
+    int32 x = 20;
+    print(x);
+end
+print(x);
+
+int32 y = 5;
+if false then
+    int32 y = 99;
+end
+print(y);
+
+int32 z = 7;
+if false then
+    int32 z = 11;
+else
+    int32 z = 22;
+end
+print(z);

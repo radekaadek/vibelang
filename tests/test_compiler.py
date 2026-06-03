@@ -33,6 +33,9 @@ EXPECTED_OUTPUTS = {
     "class.vibe": "1\n0.880000\n1000.000000\n120.500000\n45.000000\n0.990000\n100.000000\n",
     "program.vibe": "3628800\n610\n12\n1\n25\n150.000000\n1\n120.000000\n0\n2\n3\n5\n7\n11\n13\n17\n19\n23\n29\n10\n",
     "function_def_return.vibe": "0\n0.000000\n",
+    "scope_while.vibe": "3\n",
+    "scope_if.vibe": "20\n10\n5\n7\n",
+    "scope_nested.vibe": "3\n2\n",
 }
 
 
@@ -81,6 +84,20 @@ def test_semantic_error_redeclaration(tmp_path):
     )
 
     assert expected_error_msg in str(exc_info.value.__cause__)
+
+
+def test_semantic_error_inner_scope_variable(tmp_path: Path) -> None:
+    """
+    Test that a variable declared inside a while loop body cannot be accessed
+    from the outer scope after the loop ends.
+    """
+    vibe_file = EXAMPLES_DIR / "scope_inner_undeclared.vibe"
+    output_ll = tmp_path / "output.ll"
+
+    with pytest.raises(click.Abort) as exc_info:
+        compile_vibe(input_file=vibe_file, output=output_ll, opt_level=3, verbose=False)
+
+    assert "Semantic error: Undeclared variable 'inner'." in str(exc_info.value.__cause__)
 
 
 def test_read_statement(tmp_path: Path) -> None:
